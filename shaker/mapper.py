@@ -25,7 +25,8 @@ def size_from_name(bead_types):
                     
 def map_aa2cg (gro, xtc, resnames,
                bead_assignments, bead_names,
-               gmx_loc=''):
+               gmx_loc='', 
+               outname='cg_mapped', outdir='.'):
     '''Provide the universe along with the lists containing the resnames of eg the lipids,
     the bead_assignements (which atoms goes into which bead), and a list of the bead_names'''
 
@@ -67,19 +68,18 @@ def map_aa2cg (gro, xtc, resnames,
                "-f", gro, "-s", "all_hydrogen.gro",
                "-n", "MappingIndex.ndx", "-com",
                "-ng", str(len(bead_agg)),
-               "-oxt", "cg_mapped.gro",]
+               "-oxt", f"{outdir}/{outname}.gro",]
     
     cmd_xtc = [f"{gmx_loc}gmx", "traj",
                "-f", xtc, "-s", "all_hydrogen.gro",
                "-n", "MappingIndex.ndx", "-com",
                "-ng", str(len(bead_agg)),
-               "-oxt", "cg_mapped.xtc",]
+               "-oxt", f"{outdir}/{outname}.xtc",]
     
     with open("gmx_mapping.log", "w") as log:
         subprocess.run(cmd_gro, input=groups_in,
                        text=True, env=env, stdout=log,
                        stderr=subprocess.STDOUT, check=True,)
-    
         subprocess.run(cmd_xtc, input=groups_in,
                        text=True, env=env, stdout=log,
                        stderr=subprocess.STDOUT, check=True,)
@@ -88,13 +88,15 @@ def map_aa2cg (gro, xtc, resnames,
     names = []
     for i, molecule in enumerate(resnames):
         targets = u.select_atoms('resname {}'.format(molecule)).residues
-        gro_names    = bead_names[i]*len(targets)
-        names += gro_names
+        names += bead_names[i]*len(targets)
 
-    with open('cg_mapped.gro') as cggro_in:
-        gro_file = cggro_in.readlines()
+    with open(f"{outdir}/{outname}.gro") as f:
+        gro_file = f.readlines()
     for idx, line in enumerate(gro_file[2:-1]):
-        gro_file[2+idx]=line.replace(line[12:15],names[idx])
-    with open('cg_mapped.gro', 'w+') as file_out:
-        for line in gro_file:
-            file_out.write(line)
+        nm = str(names[idx]).strip()   
+        if len(nm) > 5:
+            warnings.warn(f"GRO atom name '{nm}' > 5 chars; truncating.")
+        nm = f"{nm:>5}"[:5]            # right-align, fixed width 5
+        gro_file[2 + idx] = line[:10] + nm + line[15:]
+    with open(f"{outdir}/{outname}.gro", "w") as f:
+        f.writelines(gro_file)
