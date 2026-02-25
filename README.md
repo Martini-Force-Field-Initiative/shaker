@@ -11,7 +11,7 @@ A Toolkit for the parameterization of physics-based force fields.
 
 ```bash
 git clone https://https://github.com/Lp0lp/shaker.git
-cd xyzrender
+cd shaker
 pip install .
 # or
 pip install -e .
