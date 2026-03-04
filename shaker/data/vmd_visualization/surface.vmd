@@ -1,6 +1,190 @@
 #!/usr/local/bin/vmd
 # VMD script written by save_state $Revision: 1.48 $
 # VMD version: 1.9.4a57
+
+mol default style {VDW 1.600000 12}
+mol default selection {not resname W ION CL CA NA MG TIP3 SOL}
+mol default material {AOChalky} 
+
+for {set a 0} {$a < [molinfo num]} {incr a} {
+   #set to default
+   mol modstyle 0 $a [mol default style]
+   mol modmaterial 0 $a [mol default material]
+   mol modcolor 0 $a [mol default color]
+   mol modselect 0 $a [mol default selection]
+} 
+
+display rendermode GLSL
+animate style once
+color Display Background white
+color Labels Atoms black
+color Labels Bonds black
+color Labels Angles black
+color Labels Dihedrals black
+color Labels Springs black
+display projection orthographic
+display depthcue off
+display culling off
+display nearclip set 0.01
+display shadows on
+display ambientocclusion on
+rotate x by -90
+
+axes location off
+label textsize 0.8
+label textthickness 3
+
+proc label_atoms { molid seltext } {
+#    label delete Atoms $seltext 
+    set sel [atomselect $molid $seltext]
+    set i 0
+    set atomlist [$sel list]
+    foreach {atom} $atomlist {
+        set atomlabel [format "%d/%d" $molid $atom]
+        label add Atoms $atomlabel 
+        label textformat Atoms $i {%1i:%a} 
+        label textoffset Atoms $i { 0.08 0.08 }
+        incr i
+    }
+    $sel delete
+} 
+
+proc move_sel { molid seltext offset } {
+    set nframes [molinfo $molid get numframes]
+    set sel [atomselect $molid $seltext ]
+    for { set i 0 } { $i < $nframes } { incr i } {
+        $sel frame $i
+        $sel moveby $offset
+    }
+}
+
+# define a new, very transparent material 'Glass'
+material add Glass
+material change ambient   Glass 0.00
+material change specular  Glass 0.50
+material change diffuse   Glass 0.65
+material change shininess Glass 0.53
+material change opacity   Glass 0.15
+
+# define a new, semitransparent strictly white material 'Slice', for making protein crossection pictures
+material add Slice
+material change ambient   Slice 1.00
+material change specular  Slice 0.00
+material change diffuse   Slice 1.00
+material change shininess Slice 0.00
+material change opacity   Slice 0.75
+
+# define a new, non-shiny white material 'Gypsum', for making BW protein pictures
+material add Gypsum
+material change ambient Gypsum 0.000000
+material change specular Gypsum 1.000000
+material change diffuse Gypsum 1.000000
+material change shininess Gypsum 0.000000
+material change opacity Gypsum 1.000000
+
+# define a new, non-shiny gray material 'Smog', for making BW protein crossections
+material add Smog
+material change ambient Smog 0.400000
+material change specular Smog 0.000000
+material change diffuse Smog 0.000000
+material change shininess Smog 0.000000
+material change opacity Smog 1.000000
+
+# define a new AOChalky like material with outlines.
+material add Outline
+material change ambient Outline 0.00
+material change diffuse Outline 0.85
+material change specular Outline 0.00
+material change shininess Outline 0.53
+material change mirror Outline 0.00
+material change opacity Outline 1.00
+material change outline Outline 4.00
+material change outlinewidth Outline 0.50
+
+## Desaturated colors
+color change rgb  0 0.1 0.2 0.7 ;# blue
+color change rgb  1 0.7 0.2 0.1 ;# red
+color change rgb  3 0.7 0.4 0.0 ;# orange
+color change rgb  4 0.8 0.7 0.1 ;# yellow
+color change rgb  7 0.1 0.7 0.2 ;# green
+color change rgb 10 0.1 0.7 0.8 ;# cyan
+color change rgb 11 0.6 0.1 0.6 ;# purple
+
+## fix those cancer standard colors
+after idle {
+    # create dummy molecule with one atom
+    set mol [mol new atoms 1]
+    set sel [atomselect $mol all]
+
+    # add items to color categories
+    $sel set name C
+    $sel set name P
+    $sel set name G
+    $sel set name D
+
+    # now we can define colors
+    color Name C gray
+    color Name P orange
+    color Name G red
+    color Name D silver
+
+    # clean up
+    $sel delete
+    mol delete $mol
+}
+
+proc renderframeExit { name } {
+    render TachyonInternal $name.tga true
+    exit
+}
+
+proc renderframe { name } {
+    render TachyonInternal $name.tga true
+}
+
+# Define a function to label all atoms in a given molecule and customize the labels
+proc label_all_atoms_custom {molID} {
+    # Get the total number of atoms in the molecule
+    set numAtoms [molinfo $molID get numatoms]
+    puts "Number of atoms: $numAtoms"
+
+    # Loop through each atom and add a label
+    for {set i 0} {$i < $numAtoms} {incr i} {
+        set labelID "$molID/$i"
+        label add Atoms $labelID
+    }
+
+    # Get the list of labels
+    set labelList [label list Atoms]
+    puts "List of Labels: $labelList"
+
+    # If no labels are found, return with a message
+    if {[llength $labelList] == 0} {
+        puts "No labels found for atoms in molecule ID $molID"
+        return
+    }
+
+    # Extract only the atom IDs from the label list
+    set labelIDs [list]
+    foreach label $labelList {
+        # Extract atom ID from the label (assuming the label format is {moleculeID/atomID} state)
+        lappend labelIDs [lindex [lindex $label 0] 1]
+    }
+    puts "Extracted Label IDs: $labelIDs"
+
+    # Customize the labels
+    foreach id $labelIDs {
+        # Set label text format to display atom ID
+        label textformat Atoms $id {   %a  }
+        puts "Set text format for label ID $id to display atom ID"
+    }
+    label textsize 1.2
+    label textthickness 4.0
+    color Labels Atoms cyan
+    label depth 1
+    puts "All atoms in molecule ID $molID have been labeled and customized."
+}
+
 set viewplist {}
 set fixedlist {}
 proc vmdrestoremymaterials {} {

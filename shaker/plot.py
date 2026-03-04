@@ -117,7 +117,7 @@ def render_Mapping(cg_mapped_gro, cg_mapped_xtc,
         for line in top:
             topout.write(line)
     with open('Mapping.vmd', 'w+') as topout:
-        for line in top[:662]: ## Excludes the lines that automagically render stuff.
+        for line in top[:845]: ## Excludes the lines that automagically render stuff.
             topout.write(line)
 
     if render:
