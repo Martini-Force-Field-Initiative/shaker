@@ -91,11 +91,15 @@ def plot_sasa_dir(root="./SASA",
 
     return fig, ax, items
 
-
+def _check_ext(file, allowed):
+    if Path(file).suffix.lower() not in allowed:
+        raise ValueError(f"{file} must have one of: {', '.join(allowed)}")
+                         
 def render_Mapping(cg_mapped_gro, cg_mapped_xtc,
                    aa_gro, aa_xtc,
                    vmd='vmd', 
                    vmd_resolution=1000, 
+                   dir_out='.', 
                    render=True,
                    mogrify=True,
                    plot=True):
@@ -106,39 +110,60 @@ def render_Mapping(cg_mapped_gro, cg_mapped_xtc,
     '''
     
     vmdvis = files("shaker.data.vmd_visualization") / "Mapping_render.vmd"
-    
+
+    ## Fix pathing
+    cg_mapped_gro = Path(cg_mapped_gro).resolve()
+    cg_mapped_xtc = Path(cg_mapped_xtc).resolve()
+    aa_gro = Path(aa_gro).resolve()
+    aa_xtc = Path(aa_xtc).resolve()
+    dir_out = Path(dir_out).resolve()
+
+    ## Make sure formats are supported.
+    _check_ext(cg_mapped_gro, {".gro", ".pdb"})
+    _check_ext(aa_gro, {".gro", ".pdb"})
+    _check_ext(cg_mapped_xtc, {".xtc", ".trr"})
+    _check_ext(aa_xtc, {".xtc", ".trr"})
+
+    ## Prepare render dir.
+    dir_writing = f'{dir_out}/Renders/'
+    os.makedirs(dir_writing, exist_ok=True)
+
+    ## Fix vis
     with open(vmdvis) as topinput:
         top = topinput.readlines()
-    top[351]=f'mol new {cg_mapped_gro} type gro first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all\n'
-    top[352]=f'mol addfile {cg_mapped_xtc} type xtc first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all\n'
-    top[392]=f'mol new {aa_gro} first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all\n'
-    top[393]=f'mol addfile {aa_xtc} type xtc first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all\n'
-    with open('Mapping_render.vmd', 'w+') as topout:
+        
+    ##Careful! These are hardcoded.
+    top[533]=f'mol new {cg_mapped_gro} type {Path(cg_mapped_gro).suffix.lower().lstrip(".")} first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all\n'
+    top[534]=f'mol addfile {cg_mapped_xtc} type {Path(cg_mapped_xtc).suffix.lower().lstrip(".")} first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all\n'
+    top[574]=f'mol new {aa_gro} type {Path(aa_gro).suffix.lower().lstrip(".")} first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all\n'
+    top[575]=f'mol addfile {aa_xtc} type {Path(aa_xtc).suffix.lower().lstrip(".")} first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all\n'
+    
+    with open(f'{dir_writing}/Mapping_render.vmd', 'w+') as topout:
         for line in top:
             topout.write(line)
-    with open('Mapping.vmd', 'w+') as topout:
+    with open(f'{dir_writing}/Mapping.vmd', 'w+') as topout:
         for line in top[:845]: ## Excludes the lines that automagically render stuff.
             topout.write(line)
-
+    ## render
     if render:
         print('Rendering.....')
         cmd = [vmd,
                "-dispdev", "text",
                "-e", "Mapping_render.vmd",
                "-size", str(vmd_resolution), str(vmd_resolution),]
-        logfile = "vmd_mapping_render.log"
+        logfile = f'{dir_writing}/vmd_mapping_render.log'
         with open(logfile, "w") as log:
-            subprocess.run(cmd,stdout=log, stderr=subprocess.STDOUT,check=True)
+            subprocess.run(cmd,stdout=log, stderr=subprocess.STDOUT, check=True, cwd=dir_writing)
         print('.....Rendering Complete!')
 
     if mogrify:
         subprocess.call('mogrify -format png -transparent white *.tga'
-                        , shell = True)    
+                        , shell = True, cwd=dir_writing)    
     if plot:
         fig, axs = plt.subplots(1,3, figsize=(10,5),tight_layout=True)
 
         ax = axs[0]
-        img = mpimg.imread('./MAPzz.png')
+        img = mpimg.imread(f'{dir_writing}/MAPzz.png')
         x_min, x_max, y_min, y_max = calculate_non_transparent_bounds(img)
         imgplot = ax.imshow(img[:, :, :]) 
         ax.set_xlim(x_min-100, x_max+100)
@@ -146,24 +171,25 @@ def render_Mapping(cg_mapped_gro, cg_mapped_xtc,
         ax.set_axis_off()
         
         ax = axs[1]
-        img = mpimg.imread('./MAPyy.png')
+        img = mpimg.imread(f'{dir_writing}/MAPyy.png')
         imgplot = ax.imshow(img[:, :, :]) 
         ax.set_xlim(x_min-100, x_max+100)
         ax.set_ylim(y_max+100, y_min-100)  
         ax.set_axis_off()    
         
         ax = axs[2]
-        img = mpimg.imread('./MAPxx.png')
+        img = mpimg.imread(f'{dir_writing}/MAPxx.png')
         imgplot = ax.imshow(img[:, :, :]) 
         ax.set_xlim(x_min-100, x_max+100)
         ax.set_ylim(y_max+100, y_min-100) 
         ax.set_axis_off()
 
-        fig.savefig("Mapping.png", dpi=300, transparent=True, bbox_inches='tight')
+        fig.savefig(f'{dir_writing}/Mapping.png', dpi=300, transparent=True, bbox_inches='tight')
 
 
 def render_connely_surface(vmd='vmd', 
                            vmd_resolution=1000, 
+                           dir_out='.', 
                            render=True,
                            mogrify=True,
                            plot=True):
@@ -171,31 +197,40 @@ def render_connely_surface(vmd='vmd',
     Wrapper to write the vmd visualization states to visualize the connely surfaces.
     Also renders automatically and plots the renders.
     '''
-    
-    vmdvis = files("shaker.data.vmd_visualization") / "surface.vmd"
-    os.system(f'cp {vmdvis} .')
-    vmdvis = files("shaker.data.vmd_visualization") / "surface_render.vmd"
-    os.system(f'cp {vmdvis} .')
 
+    ## Fix pathing
+    dir_out = Path(dir_out).resolve()
+    
+    ## Prepare render dir.
+    dir_writing = f'{dir_out}/Renders/'
+    os.makedirs(dir_writing, exist_ok=True)
+
+    ## Prepare vis
+    vmdvis = files("shaker.data.vmd_visualization") / "surface.vmd"
+    os.system(f'cp {vmdvis} {dir_writing}')
+    vmdvis = files("shaker.data.vmd_visualization") / "surface_render.vmd"
+    os.system(f'cp {vmdvis} {dir_writing}')
+
+    ## render
     if render:
         print('Rendering.....')
         cmd = [vmd,
                "-dispdev", "text",
                "-e", "surface_render.vmd",
                "-size", str(vmd_resolution), str(vmd_resolution),]
-        logfile = "vmd_surface_render.log"
+        logfile = f"{dir_writing}/vmd_surface_render.log"
         with open(logfile, "w") as log:
-            subprocess.run(cmd,stdout=log, stderr=subprocess.STDOUT,check=True)
+            subprocess.run(cmd,stdout=log, stderr=subprocess.STDOUT,check=True, cwd=dir_writing)
         print('.....Rendering Complete!')
 
     if mogrify:
         subprocess.call('mogrify -format png -transparent white *.tga'
-                        , shell = True)    
+                        , shell = True, cwd=dir_writing)   
     if plot:
         fig, axs = plt.subplots(1,3, figsize=(10,5),tight_layout=True)
 
         ax = axs[0]
-        img = mpimg.imread('./SASAzz.png')
+        img = mpimg.imread(f'{dir_writing}/SASAzz.png')
         x_min, x_max, y_min, y_max = calculate_non_transparent_bounds(img)
         imgplot = ax.imshow(img[:, :, :]) 
         ax.set_xlim(x_min-100, x_max+100)
@@ -203,14 +238,14 @@ def render_connely_surface(vmd='vmd',
         ax.set_axis_off()
         
         ax = axs[1]
-        img = mpimg.imread('./SASAyy.png')
+        img = mpimg.imread(f'{dir_writing}/SASAyy.png')
         imgplot = ax.imshow(img[:, :, :]) 
         ax.set_xlim(x_min-100, x_max+100)
         ax.set_ylim(y_max+100, y_min-100)  
         ax.set_axis_off()    
         
         ax = axs[2]
-        img = mpimg.imread('./SASAxx.png')
+        img = mpimg.imread(f'{dir_writing}/SASAxx.png')
         imgplot = ax.imshow(img[:, :, :]) 
         ax.set_xlim(x_min-100, x_max+100)
         ax.set_ylim(y_max+100, y_min-100) 
@@ -223,7 +258,7 @@ def render_connely_surface(vmd='vmd',
                   loc='upper right',     
                   frameon=False)
 
-        fig.savefig("ConnelySurface.png", dpi=300, transparent=True, bbox_inches='tight')
+        fig.savefig(f'{dir_writing}/ConnelySurface.png', dpi=300, transparent=True, bbox_inches='tight')
 
 
 

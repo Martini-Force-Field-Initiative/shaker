@@ -13,7 +13,6 @@ for {set a 0} {$a < [molinfo num]} {incr a} {
    mol modselect 0 $a [mol default selection]
 } 
 
-display rendermode GLSL
 animate style once
 color Display Background white
 color Labels Atoms black

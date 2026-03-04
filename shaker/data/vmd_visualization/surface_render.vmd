@@ -14,7 +14,6 @@ for {set a 0} {$a < [molinfo num]} {incr a} {
    mol modselect 0 $a [mol default selection]
 } 
 
-display rendermode GLSL
 animate style once
 color Display Background white
 color Labels Atoms black
@@ -525,7 +524,7 @@ display aodirect 0.300000
 display dof off
 display dof_fnumber 64.000000
 display dof_focaldist 0.700000
-mol new SASA/CG_Mapped/surface.pdb type pdb first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all
+mol new ../SASA/CG_Mapped/surface.pdb type pdb first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all
 mol delrep 0 top
 mol representation VDW 1.200000 12.000000
 mol color Name
@@ -599,7 +598,7 @@ mol rename top CG
 set viewpoints([molinfo top]) {{{1 0 0 -18.6839} {0 1 0 -18.638} {0 0 1 -18.6677} {0 0 0 1}} {{0.053904 0.940748 -0.334791 0} {-0.219304 0.338245 0.91515 0} {0.974167 0.02409 0.224543 0} {0 0 0 1}} {{0.158629 0 0 0} {0 0.158629 0 0} {0 0 0.158629 0} {0 0 0 1}} {{1 0 0 0} {0 1 0 0} {0 0 1 0} {0 0 0 1}}}
 lappend viewplist [molinfo top]
 # done with molecule 0
-mol new SASA/AA/surface.pdb type pdb first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all
+mol new ../SASA/AA/surface.pdb type pdb first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all
 mol delrep 0 top
 mol representation Lines 1.000000
 mol color ColorID 0
