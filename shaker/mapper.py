@@ -2,6 +2,7 @@ import MDAnalysis as md
 from importlib.resources import files
 import os
 import subprocess
+from pathlib import Path
 
 '''
 Functions and tools to process and map AA/QM trajectories to CG.
@@ -30,6 +31,11 @@ def map_aa2cg (gro, xtc, resnames,
     '''Provide the universe along with the lists containing the resnames of eg the lipids,
     the bead_assignements (which atoms goes into which bead), and a list of the bead_names'''
 
+    ## normalize paths
+    gro = Path(gro).resolve()
+    xtc = Path(xtc).resolve()
+    outdir = Path(outdir).resolve()
+    
     # Initializing the universe
     u = md.Universe(gro,xtc)
     

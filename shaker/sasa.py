@@ -4,6 +4,8 @@ import os
 import subprocess
 from .helper import bead_sizes_dict
 from .mapper import size_from_name
+from pathlib import Path
+
 '''
 Functions, tools and workflows to calculate SASA & Connely surfaces.
 Mostly wrappers for GROMACS' `gmx sasa` tool.
@@ -41,7 +43,11 @@ def run_SASA(name,
     gmx_loc : str
         Directory to gmx compilation.
     '''
-
+    ## normalize paths
+    gro = Path(gro).resolve()
+    xtc = Path(xtc).resolve()
+    dir_out = Path(dir_out).resolve()
+    
     ## Directory handling.
     dir_writing = f'{dir_out}/SASA/{name}'
     os.makedirs(dir_writing, exist_ok=True)

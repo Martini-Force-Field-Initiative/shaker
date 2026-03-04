@@ -4,6 +4,7 @@ from importlib.resources import files
 import numpy as np
 import glob
 import os
+from pathlib import Path
 
 def prepare_setup_water(initial_structure,
                         box_size=4, box_type='dodecahedron',
@@ -18,6 +19,8 @@ def prepare_setup_water(initial_structure,
     - Shoot output to a log file?
     - Allow multiple solvents.
     '''
+    ## normalize paths
+    initial_structure = Path(initial_structure).resolve()
     
     if FFitp is None: FFitp = files("shaker.data.itps") / "martini_v3.0.0.itp"
     if SolvITP is None: SolvITP = files("shaker.data.itps") / "martini_v3.0.0_solvents_v1.itp"
