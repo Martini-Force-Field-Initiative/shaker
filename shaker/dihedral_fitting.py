@@ -3,6 +3,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import combinations
+import warnings
 
 def _design_matrix(theta_deg, mults):
     th = np.deg2rad(theta_deg)
@@ -227,8 +228,10 @@ def inverted_boltzmann(data_density, kcal=False, temp=298, interpolate=False, pe
     # normalise densities with respect to themselves
     data_density = data_density / np.sum(data_density, axis=0)
 
-    # calculate energy in kT and shift them so that the min is 0
-    data_energy = -np.log(data_density)
+    # calculate energy in kT and shift them so that the min is 0    
+    with warnings.catch_warnings(): #Don't worry about log(0) = -inf, it will be converted to NaN later.
+        warnings.simplefilter("ignore", RuntimeWarning) 
+        data_energy = -np.log(data_density)
     data_energy -= np.nanmin(data_energy, axis=0)
 
     # convert to energy units
@@ -314,7 +317,7 @@ def savitzky_golay(y, window_size, order, deriv=0, rate=1):
     order_range = range(order+1)
     half_window = (window_size -1) // 2
     # precompute coefficients
-    b = np.mat([[k**i for i in order_range] for k in range(-half_window, half_window+1)])
+    b = np.asmatrix([[k**i for i in order_range] for k in range(-half_window, half_window+1)])
     m = np.linalg.pinv(b).A[deriv] * rate**deriv * factorial(deriv)
     # pad the signal at the extremes with
     # values taken from the signal itself
