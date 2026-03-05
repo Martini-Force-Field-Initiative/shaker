@@ -2,8 +2,7 @@ import MDAnalysis as md
 from importlib.resources import files
 import os 
 import subprocess
-from .helper import bead_sizes_dict
-from .mapper import size_from_name
+from .helper import bead_sizes_dict, size_from_name
 from pathlib import Path
 
 '''

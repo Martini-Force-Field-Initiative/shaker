@@ -1,8 +1,8 @@
 from pathlib import Path
 
-def write_initial_CGitp (resname, filename="initial_CG.itp",
+def write_initial_CGitp (resname, 
                          bead_names, bead_types, bead_charges, 
-                         header=''):
+                         filename="initial_CG.itp", header=''):
     
     """
     Write an initial CG topology file (.itp).
@@ -23,6 +23,10 @@ def write_initial_CGitp (resname, filename="initial_CG.itp",
         Martini bead types corresponding to each bead.
     bead_charges : sequence of float
         Partial charges assigned to each bead.
+    filename : str or Path, optional
+        Output filename of the generated `.itp` topology file.
+        The file will be overwritten if it already exists.
+        Default is `"initial_CG.itp"`.
     header : str, optional
         Optional text written at the top of the `.itp` file (e.g. comments,
         metadata, or parameterization notes).
