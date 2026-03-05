@@ -3,6 +3,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import combinations
+import warnings
 
 def _design_matrix(theta_deg, mults):
     th = np.deg2rad(theta_deg)
@@ -227,8 +228,10 @@ def inverted_boltzmann(data_density, kcal=False, temp=298, interpolate=False, pe
     # normalise densities with respect to themselves
     data_density = data_density / np.sum(data_density, axis=0)
 
-    # calculate energy in kT and shift them so that the min is 0
-    data_energy = -np.log(data_density)
+    # calculate energy in kT and shift them so that the min is 0    
+    with warnings.catch_warnings(): #Don't worry about log(0) = -inf, it will be converted to NaN later.
+        warnings.simplefilter("ignore", RuntimeWarning) 
+        data_energy = -np.log(data_density)
     data_energy -= np.nanmin(data_energy, axis=0)
 
     # convert to energy units
