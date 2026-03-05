@@ -1,7 +1,7 @@
 import MDAnalysis as md
 from pathlib import Path
 import numpy as np
-
+from tqdm import tqdm
 '''
 Functions and tools to process and map AA/QM trajectories to CG.
 '''
@@ -121,7 +121,7 @@ def map_aa2cg(gro, xtc, resnames,
     
     wrote_gro = False
     with md.Writer(out_xtc.as_posix(), n_beads) as W:
-        for ts in u.trajectory:
+        for ts in tqdm(u.trajectory):
             for k, ag in enumerate(bead_agg):
                 ## we could add a com flag here.
                 coords[k] = ag.center_of_geometry()   
