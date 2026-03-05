@@ -102,7 +102,7 @@ def measure_bonded_terms (u, resname,
                                      resid, resname, d)
                   for (a, b, c, d) in dihed_tgts]
         
-        for ts in tqdm(u.trajectory[start:stop:stride]):
+        for ts in u.trajectory[start:stop:stride]:
             for i, dist in enumerate(dists):
                 dist_out[i].append(dist.value())
             for i, ang in enumerate(angs):
