@@ -1,27 +1,10 @@
 import MDAnalysis as md
 from pathlib import Path
 import numpy as np
-
+from tqdm import tqdm
 '''
 Functions and tools to process and map AA/QM trajectories to CG.
 '''
-    
-def size_from_name(bead_types):
-    '''
-    Function to convert list of bead types into a list of bead sizes (R,S,T).
-    '''
-    # Initialize the extra list
-    extra_list = []
-    # Iterate through the strings and add the corresponding letter to the extra list
-    for string in bead_types:
-        if string[0].upper() == 'S':  # Check if the first letter is S
-            extra_list.append('S')
-        elif string[0].upper() == 'T':  # Check if the first letter is T
-            extra_list.append('T')
-        else:  # For all other cases
-            extra_list.append('R')
-    return extra_list
-
 
 def map_aa2cg(gro, xtc, resnames,
              bead_assignments, bead_names,
@@ -121,7 +104,7 @@ def map_aa2cg(gro, xtc, resnames,
     
     wrote_gro = False
     with md.Writer(out_xtc.as_posix(), n_beads) as W:
-        for ts in u.trajectory:
+        for ts in tqdm(u.trajectory):
             for k, ag in enumerate(bead_agg):
                 ## we could add a com flag here.
                 coords[k] = ag.center_of_geometry()   

@@ -2,8 +2,7 @@ import MDAnalysis as md
 from importlib.resources import files
 import os 
 import subprocess
-from .helper import bead_sizes_dict
-from .mapper import size_from_name
+from .helper import bead_sizes_dict, size_from_name
 from pathlib import Path
 
 '''
@@ -63,7 +62,7 @@ def run_SASA(name,
         if bead_names is None or bead_types is None:
             raise ValueError("When isCG=True, both 'bead_names' and 'bead_types' must be provided.")
         bead_sizes = size_from_name(bead_types)
-        write_cg_vdw(dir_writing, bead_names, bead_sizes)
+        _write_cg_vdw(dir_writing, bead_names, bead_sizes)
     else: # Most likely AA.
         vdwloc = files("shaker.data.vdw") / "vdwradii_AA.dat"
         subprocess.call(f'cp {vdwloc} {dir_writing}/vdwradii.dat'
@@ -99,7 +98,7 @@ def run_SASA(name,
                        env=env, text=True, check=True)
 
 
-def write_cg_vdw (dir_out, bead_names, bead_sizes):
+def _write_cg_vdw (dir_out, bead_names, bead_sizes):
     '''fuction to write the CG vdwradii.dat file for calculating SASA.'''
     
     sasa = open(dir_out+'/vdwradii.dat', 'w')
