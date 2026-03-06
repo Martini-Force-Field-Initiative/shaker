@@ -75,6 +75,7 @@ def plot_sasa_dir(root="./SASA",
 
     return fig, ax, items
 
+
                          
 def render_Mapping(cg_mapped_gro, cg_mapped_xtc, aa_gro, aa_xtc,
                    vmd='vmd', vmd_resolution=1000, dir_out='.', 
