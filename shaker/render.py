@@ -2,8 +2,10 @@ from collections import Counter
 from pathlib import Path
 
 import nglview as nv
+import numpy as np
 
 import MDAnalysis as md
+from MDAnalysis.analysis import align
 
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdDetermineBonds
@@ -150,6 +152,73 @@ def render_connely_surface(SASA_folder='./SASA', size='900px'):
     view.render_image(frame=True,trim=True,transparent=True,factor=6)
     return view
 
+
+def render_ensemble(gro, xtc, sel="all", step=None, n_frames=None, size="400px"):
+    """
+    Visualize an aligned ensemble of trajectory frames simultaneously.
+
+    Parameters
+    ----------
+    gro : str or Path
+        Topology file (e.g. GRO or PDB).
+    xtc : str or Path
+        Trajectory file (e.g. XTC).
+    sel : str, optional
+        Atom selection used for alignment and centering.
+        Default is "all".
+    step : int, optional
+        Show every `step` frames.
+    n_frames : int, optional
+        Total number of frames to display, sampled evenly.
+    size : str, optional
+        Viewer size (CSS units), default "400px".
+
+    Returns
+    -------
+    nglview.NGLWidget
+        Interactive NGL viewer showing multiple aligned frames.
+    """
+
+    gro = Path(gro).resolve()
+    xtc = Path(xtc).resolve()
+
+    u = md.Universe(gro, xtc)
+    ref = md.Universe(gro, xtc)
+    ref.trajectory[0]
+
+    align.AlignTraj(u, ref, select=sel, in_memory=True).run()
+
+    ag = u.select_atoms(sel)
+
+    if step is None and n_frames is None:
+        step = max(len(u.trajectory) // 20, 1)
+
+    if n_frames is not None:
+        idx = np.linspace(0, len(u.trajectory) - 1, n_frames).astype(int)
+    else:
+        idx = range(0, len(u.trajectory), step)
+
+    view = nv.NGLWidget()
+
+    for i in idx:
+        u.trajectory[i]
+
+        coords = u.atoms.positions.copy()
+        coords -= ag.center_of_mass()
+
+        snap = md.Merge(u.atoms)
+        snap.atoms.positions = coords
+
+        comp = view.add_trajectory(snap)
+        comp.clear_representations()
+        comp.add_representation("licorice", selection="all", opacity=0.5)
+
+    view.center()
+    view._set_size(size, size)
+    view.camera = "orthographic"
+
+    return view
+    
 def render_2dMapping(pdb_file, resname, bead_assignments, bead_names,
                      out_svg="cg_overlay.svg", size=(950, 480), mode="connected",         
                      bead_r=20.0, conn_r=12.0, alpha=0.3, line_w=2.0,
@@ -289,6 +358,7 @@ def render_2dMapping(pdb_file, resname, bead_assignments, bead_names,
     overlay.append("</g>")
     svg = svg.replace("</svg>", "\n".join(overlay) + "\n</svg>")
     Path(out_svg).write_text(svg, encoding="utf-8")
+
 
 def _load_mols(pdb_file):
     """Return (molH, mol): sanitized molecule with Hs, and no-H molecule with 2D coords."""
