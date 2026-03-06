@@ -13,6 +13,7 @@ import os
 import subprocess
 import nglview as nv
 import MDAnalysis as md
+
 '''
 Collection of functions to assist in plotting and imaging.
 '''
@@ -214,7 +215,143 @@ def render_connely_surface(SASA_folder='./SASA', size='900px'):
     view.camera = "orthographic"
     view.render_image(frame=True,trim=True,transparent=True,factor=6)
     return view
-                         
+
+
+def plot_bonded_distributions(
+    *bonded_dicts,
+    labels=None,
+    colors=None,
+    outfile="cleanbonds",
+    transparent=True,
+    show_peaks=True,
+):
+    """
+    Plot bonded distributions (distances, angles, dihedrals) from one or more
+    bonded dictionaries.
+
+    Parameters
+    ----------
+    *bonded_dicts : dict
+        Any number of bonded dictionaries with structure like:
+        {
+            "distances": {"targets": ..., "bins": ..., "hist": ...},
+            "angles": {"targets": ..., "bins": ..., "hist": ...},
+            "dihedrals": {"targets": ..., "bins": ..., "hist": ...},
+        }
+
+    labels : list[str] | None, optional
+        Labels for each bonded dictionary. If None, uses Dataset 1, Dataset 2, ...
+
+    colors : list[str] | None, optional
+        Line colors for each bonded dictionary. If None, matplotlib default cycle is used.
+
+    outfile : str | None, optional
+        Output filename stem. If provided, saves <outfile>.svg/.pdf/.png.
+        If None, nothing is saved.
+
+    transparent : bool, optional
+        Whether to save figures with transparent background.
+
+    show_peaks : bool, optional
+        Whether to annotate the peak position of each histogram.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The generated figure.
+
+    Raises
+    ------
+    ValueError
+        If no dictionaries are provided, or if targets do not match across inputs.
+    """
+    
+    if len(bonded_dicts) == 0:
+        raise ValueError("At least one bonded dictionary must be provided.")
+
+    categories = ("distances", "angles", "dihedrals")
+
+    # Check that all dictionaries share the same targets
+    ref = bonded_dicts[0]
+    for cat in categories:
+        ref_targets = ref[cat]["targets"]
+        for idx, bonded in enumerate(bonded_dicts[1:], start=1):
+            if bonded[cat]["targets"] != ref_targets:
+                raise ValueError(f"Mismatch in '{cat}' targets between input 0 and input {idx}.")
+
+    # Labels
+    if labels is None:
+        labels = [f"Dataset {i+1}" for i in range(len(bonded_dicts))]
+    if len(labels) != len(bonded_dicts):
+        raise ValueError("Length of 'labels' must match number of bonded dictionaries.")
+
+    # Colors
+    if colors is None:
+        colors = [None] * len(bonded_dicts)
+    if len(colors) != len(bonded_dicts):
+        raise ValueError("Length of 'colors' must match number of bonded dictionaries.")
+
+    # Layout helpers from shaker
+    grid_dist  = _best_grid(len(ref["distances"]["targets"]))
+    grid_ang   = _best_grid(len(ref["angles"]["targets"]))
+    grid_dihed = _best_grid(len(ref["dihedrals"]["targets"]))
+
+    figsize = _predict_figsize([grid_dist, grid_ang, grid_dihed])
+    height_ratios = [grid_dist[0], grid_ang[0], grid_dihed[0]]
+
+    fig = plt.figure(figsize=figsize, constrained_layout=True)
+    gs = gridspec.GridSpec(3, 1, figure=fig, height_ratios=height_ratios, hspace=1)
+
+    config = {
+        "distances": {"grid": grid_dist,
+                      "subplot": gs[0],
+                      "xlabel": "Bond (Å)",},
+        "angles": {"grid": grid_ang,
+                   "subplot": gs[1],
+                   "xlabel": "Angle (°)",},
+        "dihedrals": {"grid": grid_dihed,
+                      "subplot": gs[2],
+                      "xlabel": "Dihedral angle (°)",},
+        }
+
+    for cat in categories:
+        targets = ref[cat]["targets"]
+        subgrid = gridspec.GridSpecFromSubplotSpec(
+            config[cat]["grid"][0],
+            config[cat]["grid"][1],
+            subplot_spec=config[cat]["subplot"],
+        )
+
+        for i, distribution in enumerate(targets):
+            ax = fig.add_subplot(subgrid[i])
+
+            for bonded, label, color in zip(bonded_dicts, labels, colors):
+                bins = bonded[cat]["bins"]
+                hist = bonded[cat]["hist"][i]
+
+                ax.plot(bins, hist, label=label, color=color)
+
+                if show_peaks and len(hist) > 0:
+                    peak_idx = np.argmax(hist)
+                    ax.text(
+                        bins[peak_idx],
+                        hist[peak_idx],
+                        f"{bins[peak_idx]:.2f}",
+                        color=color)
+
+            ax.set_title("-".join(distribution), fontweight="bold")
+            ax.legend(loc="upper right", frameon=False, fontsize=4)
+            ax.set_xlabel(config[cat]["xlabel"], fontsize=8)
+            ax.set_ylabel("Prob. density")
+
+    if outfile is not None:
+        fig.savefig(f"{outfile}.svg", transparent=transparent)
+        fig.savefig(f"{outfile}.pdf", transparent=transparent)
+        fig.savefig(f"{outfile}.png", transparent=transparent, dpi=300)
+
+    return fig
+
+
 def render_mapping_vmd(cg_mapped_gro, cg_mapped_xtc, aa_gro, aa_xtc,
                        vmd='vmd', vmd_resolution=1000, dir_out='.', 
                        render=True, mogrify=True, plot=True):
