@@ -278,7 +278,6 @@ def render_2dMapping(pdb_file, resname, bead_assignments, bead_names,
     w, h = size
     drawer = rdMolDraw2D.MolDraw2DSVG(w, h)
     opts = drawer.drawOptions()
-    opts.noCarbonSymbols = True
     opts.explicitMethyl = False
     opts.addAtomIndices = False
     opts.addStereoAnnotation = False
