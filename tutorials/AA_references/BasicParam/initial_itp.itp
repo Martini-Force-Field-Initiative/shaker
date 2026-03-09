@@ -1,0 +1,86 @@
+; Parameterised by Pablo Cardona Perez @ ENS de Lyon, 2026.
+; Molecular name: 2,6-dichloro-N-[2-(propanoylamino)-4-pyridinyl]benzamide
+; SMILES: CCC(=O)Nc1cc(NC(=O)c2c(Cl)cccc2Cl)ccn1
+
+[ moleculetype ]
+MOL  1
+[ atoms ]
+; nr type resnr residue atom cgnr charge mass
+   1    SX3        0    MOL     R1         1       0    
+   2    SX3        0    MOL     R2         2       0    
+   3    TC5        0    MOL     R3         3       0    
+   4    SP2        0    MOL     P1         4       0    
+   5    TC5        0    MOL     R4         5       0    
+   6    TN6a       0    MOL     R5         6       0    
+   7    TC5        0    MOL     R6         7       0    
+   8    SP2        0    MOL     P2         8       0    
+   9    TC1        0    MOL     C1         9       0    
+
+[ constraints ]
+;  i       j     funct length
+; first ring
+   1       2       1    0.31      ;R1-R2
+   1       3       1    0.27      ;R1-R3
+   2       3       1    0.27      ;R2-R3
+; second ring
+   5       6       1    0.23      ;R4-R5
+   5       7       1    0.27      ;R4-R6
+   6       7       1    0.23      ;R5-R6
+; First ring to P1
+   1       4       1    0.29      ;R1-P1
+; P1 to second ring
+   4       5       1    0.31      ;P1-R4
+; second ring to second amide
+   7       8       1    0.27      ;R6-P2
+
+[ bonds ]
+;  i       j     funct length   k
+; 1st ring to 1st amide
+   2       4       1    0.290   8000 ;R2-P1
+; 1st amide to 2nd ring
+   4       7       1    0.270   8000 ;P1-R6
+; 2nd ring to 2nd amide
+   6       8       1    0.290   8000 ;R5-P2
+
+[ angles ]
+;  i  j  k   funct   angle   force.c.
+; angles between the two rings
+   1  2  5     1      74      25 ;R1 R2 R4
+   2  5  7     1      76     100 ;R2 R4 R6
+   3  4  6     1     162     175 ;R3 P1 R5
+   1  4  5     1     132      50 ;R1 P1 R4
+   1  4  7     1     146      25 ;R1 P1 R6
+
+[dihedrals]
+; i j k l   funct  phase/refang  force.c   m
+;R1 R2 R4 R6 between two rings (hinge)
+  1 2 5 7     9       -116.215    1.448    1
+  1 2 5 7     9          0.893    4.041    2
+  1 2 5 7     9        -92.443    0.226    3
+  1 2 5 7     9         -0.665    0.889    4
+
+  3 1 2 4     2           -168      220  ;R3 R1 R2 P1
+  6 5 7 4     2           -176      175  ;R5 R4 R6 P1
+  5 7 6 8     2            176      175  ;R4 R6 R5 P2
+
+;;;;;;;;;;;
+;;;; R ;;;;
+;;;;;;;;;;;
+
+[ bonds ]
+;  i       j     funct length   k
+   8       9     1    0.25    8000  ;P2-C1
+
+[ angles ]
+;  i  j  k   funct   angle   force.c.
+   9  8  6     10     138      120  ;C1 P2 R5
+
+[ dihedrals ]
+; i j k l   funct  phase/refang  force.c   m
+;C1 P2 R5 R6
+   9 8 6 7     9        -0.662       5.339   1
+   9 8 6 7     9       161.525       0.568   3
+   9 8 6 7     9       955.460       0.339   4
+   9 8 6 7     9       165.342       0.435   5
+;;;;;;;;;;;;
+;;;;;;;;;;;;

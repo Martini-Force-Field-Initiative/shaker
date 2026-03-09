@@ -2,20 +2,13 @@ import math
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
-from importlib.resources import files
-import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib as mpl
-import matplotlib.image as mpimg
 mpl.rcParams['figure.dpi'] = 150
-import matplotlib.patches as mpatches
-import os
-import subprocess
 
 '''
-Collection of functions to assist in plotting and imaging.
+Collection of functions to assist in matplotlib plotting.
 '''
-
 
 def plot_sasa_dir(root="./SASA",
                   xvg="resarea_SASA.xvg"):
@@ -75,222 +68,141 @@ def plot_sasa_dir(root="./SASA",
 
     return fig, ax, items
 
-                         
-def render_Mapping(cg_mapped_gro, cg_mapped_xtc, aa_gro, aa_xtc,
-                   vmd='vmd', vmd_resolution=1000, dir_out='.', 
-                   render=True, mogrify=True, plot=True):
-    '''
-    Visualize and render the mapping between atomistic and coarse-grained models.
 
-    This function generates a VMD visualization showing the coarse-grained
-    mapping overlaid on top of the corresponding atomistic structure. A
-    template VMD state is modified to load the provided trajectories and
-    optionally used to render images from multiple viewpoints.
-
-    The workflow consists of:
-    1. Preparing a VMD visualization state using the provided AA and CG files.
-    2. Optionally running VMD in text mode to render images.
-    3. Optionally converting rendered images to PNG using ImageMagick.
-    4. Optionally assembling the rendered images into a comparison figure.
+def plot_bonded_distributions(
+    *bonded_dicts,
+    labels=None,
+    colors=None,
+    outfile="cleanbonds",
+    transparent=True,
+    show_peaks=True,
+):
+    """
+    Plot bonded distributions (distances, angles, dihedrals) from one or more
+    bonded dictionaries.
 
     Parameters
     ----------
-    cg_mapped_gro : str or Path
-        Structure file of the mapped coarse-grained system (.gro or .pdb).
-    cg_mapped_xtc : str or Path
-        Trajectory file of the mapped coarse-grained system (.xtc or .trr).
-    aa_gro : str or Path
-        Atomistic structure file (.gro or .pdb).
-    aa_xtc : str or Path
-        Atomistic trajectory file (.xtc or .trr).
-    vmd : str, optional
-        Path to the VMD executable. Default assumes `vmd` is available in PATH.
-    vmd_resolution : int, optional
-        Resolution used when rendering images with VMD. Default is 1000.
-    dir_out : str or Path, optional
-        Output directory where render files and images will be written.
-    render : bool, optional
-        If True, run VMD in text mode to generate render images.
-    mogrify : bool, optional
-        If True, convert rendered `.tga` images to `.png` using ImageMagick.
-    plot : bool, optional
-        If True, assemble rendered images into a matplotlib figure.
+    *bonded_dicts : dict
+        Any number of bonded dictionaries with structure like:
+        {
+            "distances": {"targets": ..., "bins": ..., "hist": ...},
+            "angles": {"targets": ..., "bins": ..., "hist": ...},
+            "dihedrals": {"targets": ..., "bins": ..., "hist": ...},
+        }
 
-    Notes
-    -----
-    Requires:
-    - VMD installed and accessible via `vmd`
-    - ImageMagick installed for `mogrify` when `mogrify=True`
-    
-    '''
-    
-    vmdvis = files("shaker.data.vmd_visualization") / "Mapping_render.vmd"
+    labels : list[str] | None, optional
+        Labels for each bonded dictionary. If None, uses Dataset 1, Dataset 2, ...
 
-    ## Fix pathing
-    cg_mapped_gro = Path(cg_mapped_gro).resolve()
-    cg_mapped_xtc = Path(cg_mapped_xtc).resolve()
-    aa_gro = Path(aa_gro).resolve()
-    aa_xtc = Path(aa_xtc).resolve()
-    dir_out = Path(dir_out).resolve()
+    colors : list[str] | None, optional
+        Line colors for each bonded dictionary. If None, matplotlib default cycle is used.
 
-    ## Make sure formats are supported.
-    _check_ext(cg_mapped_gro, {".gro", ".pdb"})
-    _check_ext(aa_gro, {".gro", ".pdb"})
-    _check_ext(cg_mapped_xtc, {".xtc", ".trr"})
-    _check_ext(aa_xtc, {".xtc", ".trr"})
+    outfile : str | None, optional
+        Output filename stem. If provided, saves <outfile>.svg/.pdf/.png.
+        If None, nothing is saved.
 
-    ## Prepare render dir.
-    dir_writing = dir_out / "Renders"
-    dir_writing.mkdir(parents=True, exist_ok=True)
-    
-    ## Fix vis
-    with open(vmdvis) as topinput:
-        top = topinput.readlines()
-        
-    ##Careful! These are hardcoded. Will make this better at some point.
-    top[533]=f'mol new {cg_mapped_gro} type {Path(cg_mapped_gro).suffix.lower().lstrip(".")} first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all\n'
-    top[534]=f'mol addfile {cg_mapped_xtc} type {Path(cg_mapped_xtc).suffix.lower().lstrip(".")} first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all\n'
-    top[574]=f'mol new {aa_gro} type {Path(aa_gro).suffix.lower().lstrip(".")} first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all\n'
-    top[575]=f'mol addfile {aa_xtc} type {Path(aa_xtc).suffix.lower().lstrip(".")} first 0 last -1 step 1 filebonds 1 autobonds 1 waitfor all\n'
-    
-    with open(f'{dir_writing}/Mapping_render.vmd', 'w+') as topout:
-        for line in top:
-            topout.write(line)
-    with open(f'{dir_writing}/Mapping.vmd', 'w+') as topout:
-        for line in top[:845]: ## Excludes the lines that automagically render stuff.
-            topout.write(line)
-    ## render
-    if render:
-        print('Rendering.....')
-        cmd = [vmd,
-               "-dispdev", "text", "-e", "Mapping_render.vmd",
-               "-size", str(vmd_resolution), str(vmd_resolution),]
-        logfile = f'{dir_writing}/vmd_mapping_render.log'
-        with open(logfile, "w") as log:
-            subprocess.run(cmd,stdout=log, stderr=subprocess.STDOUT, check=True, cwd=dir_writing)
-        print('.....Rendering Complete!')
+    transparent : bool, optional
+        Whether to save figures with transparent background.
 
-    if mogrify:
-        subprocess.run(["mogrify", "-format", "png", "-transparent", "white", "*.tga"]
-                        , check=True, cwd=dir_writing)    
-    if plot:
-        fig, axs = plt.subplots(1,3, figsize=(10,5),tight_layout=True)
-        views = ["MAPzz", "MAPyy", "MAPxx"]
-        img0 = mpimg.imread(dir_writing / f"{views[0]}.png")
-        x_min, x_max, y_min, y_max = _calculate_non_transparent_bounds(img0)
-        for ax, v in zip(axs, views):
-            img = mpimg.imread(dir_writing / f"{v}.png")
-            ax.imshow(img)
-            ax.set_xlim(x_min-100, x_max+100)
-            ax.set_ylim(y_max+100, y_min-100)
-            ax.set_axis_off()
+    show_peaks : bool, optional
+        Whether to annotate the peak position of each histogram.
 
-        fig.savefig(f'{dir_writing}/Mapping.png', dpi=300, transparent=True, bbox_inches='tight')
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The generated figure.
 
-
-def render_connely_surface(vmd='vmd', vmd_resolution=1000, dir_out='.', 
-                           render=True, mogrify=True, plot=True):
-    '''
-    Render Connolly surface images using VMD and optionally assemble a figure.
-
-    This function copies VMD visualization scripts distributed with SHAKER
-    (`surface.vmd` and `surface_render.vmd`) into an output directory and
-    optionally runs VMD in text mode to render images. Rendered `.tga` images
-    can be converted to `.png` using ImageMagick, and multiple viewpoints can
-    be combined into a single matplotlib figure.
-
-    Parameters
-    ----------
-    vmd : str, optional
-        Path to the VMD executable (default: "vmd", assuming it is on PATH).
-    vmd_resolution : int, optional
-        Rendering resolution passed to VMD via `-size` (default: 1000).
-    dir_out : str or Path, optional
-        Output directory. Render assets are written to `dir_out/Renders/`.
-    render : bool, optional
-        If True, run VMD in text mode to generate render images.
-    mogrify : bool, optional
-        If True, convert `.tga` renders to `.png` using ImageMagick `mogrify`.
-    plot : bool, optional
-        If True, load the rendered PNGs and create a composite figure.
-
-    Notes
-    -----
-    Requires:
-    - VMD installed and accessible via `vmd`
-    - ImageMagick installed for `mogrify` when `mogrify=True`
-
-    '''
-
-    ## Fix pathing
-    dir_out = Path(dir_out).resolve()
-    
-    ## Prepare render dir.
-    dir_writing = dir_out / "Renders"
-    dir_writing.mkdir(parents=True, exist_ok=True)
-
-    ## Prepare vis
-    vmdvis = files("shaker.data.vmd_visualization") / "surface.vmd"
-    os.system(f'cp {vmdvis} {dir_writing}')
-    vmdvis = files("shaker.data.vmd_visualization") / "surface_render.vmd"
-    os.system(f'cp {vmdvis} {dir_writing}')
-
-    ## render
-    if render:
-        print('Rendering.....')
-        cmd = [vmd,
-               "-dispdev", "text",
-               "-e", "surface_render.vmd",
-               "-size", str(vmd_resolution), str(vmd_resolution),]
-        logfile = f"{dir_writing}/vmd_surface_render.log"
-        with open(logfile, "w") as log:
-            subprocess.run(cmd,stdout=log, stderr=subprocess.STDOUT,check=True, cwd=dir_writing)
-        print('.....Rendering Complete!')
-
-    if mogrify:
-        subprocess.run(["mogrify", "-format", "png", "-transparent", "white", "*.tga"]
-                        , check=True, cwd=dir_writing)   
-    if plot:
-        fig, axs = plt.subplots(1,3, figsize=(10,5),tight_layout=True)
-
-        views = ["SASAzz", "SASAyy", "SASAxx"]
-        img0 = mpimg.imread(dir_writing / f"{views[0]}.png")
-        x_min, x_max, y_min, y_max = _calculate_non_transparent_bounds(img0)
-        for ax, v in zip(axs, views):
-            img = mpimg.imread(dir_writing / f"{v}.png")
-            ax.imshow(img)
-            ax.set_xlim(x_min-100, x_max+100)
-            ax.set_ylim(y_max+100, y_min-100)
-            ax.set_axis_off()
-
-        # Create fake legend handles
-        blue_patch = mpatches.Patch(color='tab:blue', label='AA surface')
-        red_patch  = mpatches.Patch(color='tab:red',  label='CG Mapped surface')
-        ax.legend(handles=[blue_patch, red_patch],
-                  loc='upper right',     
-                  frameon=False)
-
-        fig.savefig(f'{dir_writing}/ConnelySurface.png', dpi=300, transparent=True, bbox_inches='tight')
-
-
-def _calculate_non_transparent_bounds(image):
+    Raises
+    ------
+    ValueError
+        If no dictionaries are provided, or if targets do not match across inputs.
     """
-    Calculate the bounding box of the non-transparent region of an image.
     
-    Parameters:
-        image (numpy.ndarray): The image array (with an alpha channel for transparency).
-        
-    Returns:
-        tuple: (x_min, x_max, y_min, y_max) bounds of the non-transparent region.
-    """
-    if image.shape[-1] == 4:  # Check if the image has an alpha channel (RGBA)
-        alpha_channel = image[..., 3]
-        non_transparent_indices = np.where(alpha_channel > 0)
-        y_min, y_max = non_transparent_indices[0].min(), non_transparent_indices[0].max()
-        x_min, x_max = non_transparent_indices[1].min(), non_transparent_indices[1].max()
-        return x_min, x_max, y_min, y_max
-    else:
-        raise ValueError("The image does not have an alpha channel (RGBA).")
+    if len(bonded_dicts) == 0:
+        raise ValueError("At least one bonded dictionary must be provided.")
+
+    categories = ("distances", "angles", "dihedrals")
+
+    # Check that all dictionaries share the same targets
+    ref = bonded_dicts[0]
+    for cat in categories:
+        ref_targets = ref[cat]["targets"]
+        for idx, bonded in enumerate(bonded_dicts[1:], start=1):
+            if bonded[cat]["targets"] != ref_targets:
+                raise ValueError(f"Mismatch in '{cat}' targets between input 0 and input {idx}.")
+
+    # Labels
+    if labels is None:
+        labels = [f"Dataset {i+1}" for i in range(len(bonded_dicts))]
+    if len(labels) != len(bonded_dicts):
+        raise ValueError("Length of 'labels' must match number of bonded dictionaries.")
+
+    # Colors
+    if colors is None:
+        colors = [None] * len(bonded_dicts)
+    if len(colors) != len(bonded_dicts):
+        raise ValueError("Length of 'colors' must match number of bonded dictionaries.")
+
+    # Layout helpers from shaker
+    grid_dist  = _best_grid(len(ref["distances"]["targets"]))
+    grid_ang   = _best_grid(len(ref["angles"]["targets"]))
+    grid_dihed = _best_grid(len(ref["dihedrals"]["targets"]))
+
+    figsize = _predict_figsize([grid_dist, grid_ang, grid_dihed])
+    height_ratios = [grid_dist[0], grid_ang[0], grid_dihed[0]]
+
+    fig = plt.figure(figsize=figsize, constrained_layout=True)
+    gs = gridspec.GridSpec(3, 1, figure=fig, height_ratios=height_ratios, hspace=1)
+
+    config = {
+        "distances": {"grid": grid_dist,
+                      "subplot": gs[0],
+                      "xlabel": "Bond (Å)",},
+        "angles": {"grid": grid_ang,
+                   "subplot": gs[1],
+                   "xlabel": "Angle (°)",},
+        "dihedrals": {"grid": grid_dihed,
+                      "subplot": gs[2],
+                      "xlabel": "Dihedral angle (°)",},
+        }
+
+    for cat in categories:
+        targets = ref[cat]["targets"]
+        subgrid = gridspec.GridSpecFromSubplotSpec(
+            config[cat]["grid"][0],
+            config[cat]["grid"][1],
+            subplot_spec=config[cat]["subplot"],
+        )
+
+        for i, distribution in enumerate(targets):
+            ax = fig.add_subplot(subgrid[i])
+
+            for bonded, label, color in zip(bonded_dicts, labels, colors):
+                bins = bonded[cat]["bins"]
+                hist = bonded[cat]["hist"][i]
+
+                ax.plot(bins, hist, label=label, color=color)
+
+                if show_peaks and len(hist) > 0:
+                    peak_idx = np.argmax(hist)
+                    ax.text(
+                        bins[peak_idx],
+                        hist[peak_idx],
+                        f"{bins[peak_idx]:.2f}",
+                        color=color)
+
+            ax.set_title("-".join(distribution), fontweight="bold")
+            ax.legend(loc="upper right", frameon=False, fontsize=4)
+            ax.set_xlabel(config[cat]["xlabel"], fontsize=8)
+            ax.set_ylabel("Prob. density")
+
+    if outfile is not None:
+        fig.savefig(f"{outfile}.svg", transparent=transparent)
+        fig.savefig(f"{outfile}.pdf", transparent=transparent)
+        fig.savefig(f"{outfile}.png", transparent=transparent, dpi=300)
+
+    return fig
+
 
 def _read_SASA_xvg(xvg):
     '''
@@ -301,9 +213,6 @@ def _read_SASA_xvg(xvg):
     a = np.array(rows, float)
     return a[0, 1], a[0, 2]   
 
-def _check_ext(file, allowed):
-    if Path(file).suffix.lower() not in allowed:
-        raise ValueError(f"{file} must have one of: {', '.join(allowed)}")
 
 def _best_grid(n: int):
     """Return (nrows, ncols) for n plots using a near-square layout."""
@@ -312,6 +221,7 @@ def _best_grid(n: int):
     ncols = math.ceil(math.sqrt(n))
     nrows = math.ceil(n / ncols)
     return nrows, ncols
+
 
 def _predict_figsize(grids, cell_w=3.2, cell_h=1.5, section_gap_h=0.6,
                     left=0.8, right=0.2, top=0.6, bottom=0.6):
