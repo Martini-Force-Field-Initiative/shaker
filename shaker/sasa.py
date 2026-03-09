@@ -52,7 +52,6 @@ def run_SASA(name,
     Notes
     -----
     - This function currently analyzes only the first residue matching `resname`.
-    
     '''
     ## normalize paths
     gro = Path(gro).resolve()
