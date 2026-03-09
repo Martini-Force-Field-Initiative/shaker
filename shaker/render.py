@@ -219,7 +219,7 @@ def render_ensemble(gro, xtc, sel="all", step=None, n_frames=None, size="400px")
 
     return view
     
-def render_2dMapping(pdb_file, resname, bead_assignments, bead_names,
+def render_2dMapping(pdb_file, resname, mapping,
                      out_svg="cg_overlay.svg", size=(950, 480), mode="connected",         
                      bead_r=20.0, conn_r=12.0, alpha=0.3, line_w=2.0,
                      font_size=14, label_dy=20.0,):
@@ -241,10 +241,15 @@ def render_2dMapping(pdb_file, resname, bead_assignments, bead_names,
         Input PDB file containing the molecule.
     resname : str
         Residue name identifying the molecule in the PDB.
-    bead_assignments : list[list[str]]
-        Atom names assigned to each CG bead (repeated names act as weights).
-    bead_names : list[str]
-        Labels for each bead.
+    mapping : dict
+        Mapping dictionary in SHAKER format. The expected structure is::
+
+            mapping = {
+                "RESNAME": {
+                    "BEAD1": {"type": "...", "charge": 0, "atoms": [...]},
+                    "BEAD2": {"type": "...", "charge": 0, "atoms": [...]},
+                }
+            }
     out_svg : str, optional
         Output SVG filename.
     mode : {"circle","atomblobs","connected","both"}, optional
@@ -260,6 +265,20 @@ def render_2dMapping(pdb_file, resname, bead_assignments, bead_names,
 
     if mode not in {"circle", "atomblobs", "connected", "both"}:
         raise ValueError("mode must be one of: 'circle', 'atomblobs', 'connected', 'both'")
+        
+    if resname not in mapping:
+        raise ValueError(f"No mapping found for resname '{resname}'")
+
+    # Ensure exactly one residue of this type is present
+    u = md.Universe(pdb_file)
+    n_res = len(u.select_atoms(f"resname {resname}").residues)
+    if n_res != 1:
+        raise ValueError(
+            f"render_2dMapping expects exactly 1 residue with resname '{resname}' "
+            f"in {pdb_file}, found {n_res}")
+        
+    bead_names = list(mapping[resname].keys())
+    bead_assignments = [b["atoms"] for b in mapping[resname].values()]
 
     molH, mol = _load_mols(pdb_file)
     idxH = _atom_name_map(molH, resname)
