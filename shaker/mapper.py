@@ -6,8 +6,7 @@ from tqdm import tqdm
 Functions and tools to process and map AA/QM trajectories to CG.
 '''
 
-def map_aa2cg(gro, xtc, resnames,
-             bead_assignments, bead_names,
+def map_aa2cg(gro, xtc, mapping,
              outname="cg_mapped", outdir="."):
     
     '''
@@ -25,17 +24,29 @@ def map_aa2cg(gro, xtc, resnames,
     xtc : str or Path
         Atomistic trajectory file (.xtc or .trr) containing the coordinates
         to be mapped.
-    resnames : list of str
-        Residue names to be mapped. Each entry must correspond to a mapping
-        definition in `bead_assignments` and `bead_names`.
-    bead_assignments : list of list of list of str
-        Atom-to-bead mapping definitions. For each residue type in `resnames`,
-        this contains a list of beads, where each bead is defined by a list of
-        atom names contributing to that bead.
-    bead_names : list of list of str
-        Names assigned to the coarse-grained beads for each residue type.
-        The number of bead names must match the number of bead definitions
-        in `bead_assignments`.
+    mapping : dict
+        Dictionary defining the atom-to-bead mapping. The expected format is::
+    
+            mapping = {
+                "RESNAME": {
+                    "BEAD1": {
+                        "type": "BEADTYPE",
+                        "charge": 0,
+                        "atoms": ["ATOM1", "ATOM2", ...],
+                    },
+                    "BEAD2": {
+                        "type": "BEADTYPE",
+                        "charge": 0,
+                        "atoms": ["ATOM3", "ATOM4", ...],
+                    },
+                }
+            }
+    
+        The top-level keys correspond to residue names present in the atomistic
+        system. Each bead entry is keyed by the desired CG bead name and must
+        contain an ``atoms`` field listing the atom names contributing to that
+        bead. Optional ``type`` and ``charge`` fields may also be provided for
+        use in topology generation or bookkeeping.
     outname : str, optional
         Base name of the output files. Default is "cg_mapped".
     outdir : str or Path, optional
@@ -46,8 +57,10 @@ def map_aa2cg(gro, xtc, resnames,
     -----
     - Bead coordinates are computed as the center of geometry (COG) of the
       atoms assigned to each bead.
-    - The output trajectory contains one particle per bead in the order
-      defined by `resnames` and `bead_assignments`.
+    - Atom names may appear multiple times in a bead definition to apply
+      weighting when computing the bead center.
+    - The output trajectory contains one particle per bead in the order defined
+      by the mapping dictionary.
     - The output structure corresponds to the first frame of the mapped
       trajectory.
     - Atom selections that do not match any atoms will raise a `ValueError`.
@@ -66,25 +79,26 @@ def map_aa2cg(gro, xtc, resnames,
     out_resnames = []
     out_atomnames = []
 
-    for i, resname in enumerate(resnames):
+    for resname, beads in mapping.items():
         for res in u.select_atoms(f"resname {resname}").residues:
             atoms = res.atoms
-            for bead_idx, bead in enumerate(bead_assignments[i]):
+            for bead_name, bead_def in beads.items():
                 agg_whole = u.select_atoms("name empty")
-                for atom in bead:
+                for atom in bead_def["atoms"]:
                     agg = atoms.select_atoms(f"name {atom}")
                     if len(agg) == 0:
                         raise ValueError(f"Atom '{atom}' not found in resname '{resname}' (resid {res.resid})")
                     agg_whole += agg
+    
                 bead_agg.append(agg_whole)
-
-                # metadata for output topology
                 out_resids.append(res.resid)
                 out_resnames.append(res.resname)
-                out_atomnames.append(bead_names[i][bead_idx])
-
+                out_atomnames.append(bead_name)
+                
     n_beads = len(bead_agg)
-
+    if n_beads == 0:
+        raise ValueError("No beads were generated. Check the mapping and residue names.")
+        
     # Create an empty CG Universe with n_beads atoms
     cg = md.Universe.empty(
         n_atoms=n_beads,
