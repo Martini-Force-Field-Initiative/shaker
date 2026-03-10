@@ -1,7 +1,7 @@
 import MDAnalysis as md
 from pathlib import Path
 import numpy as np
-from tqdm import tqdm
+from tqdm.autonotebook import tqdm
 '''
 Functions and tools to process and map AA/QM trajectories to CG.
 '''

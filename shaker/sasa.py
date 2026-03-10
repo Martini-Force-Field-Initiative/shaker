@@ -2,7 +2,7 @@ import MDAnalysis as md
 from importlib.resources import files
 import os 
 import subprocess
-from .helper import bead_sizes_dict, size_from_name
+from .helper import _bead_sizes_dict, _size_from_name
 from pathlib import Path
 
 '''
@@ -77,7 +77,7 @@ def run_SASA(name,
     
         bead_names = list(mapping[resname].keys())
         bead_types = [bead["type"] for bead in mapping[resname].values()]
-        bead_sizes = size_from_name(bead_types)
+        bead_sizes = _size_from_name(bead_types)
         _write_cg_vdw(dir_writing, bead_names, bead_sizes)
     else: # Most likely AA.
         vdwloc = files("shaker.data.vdw") / "vdwradii_AA.dat"
@@ -120,6 +120,6 @@ def _write_cg_vdw (dir_out, bead_names, bead_sizes):
     sasa = open(dir_out+'/vdwradii.dat', 'w')
     sasa.write(';CG van der walls radii\n')
     for idx, bead in enumerate(bead_names):
-        size = bead_sizes_dict[bead_sizes[idx]]
+        size = _bead_sizes_dict[bead_sizes[idx]]
         sasa.write('???  {}    {}\n'.format(bead, size))
     sasa.close()

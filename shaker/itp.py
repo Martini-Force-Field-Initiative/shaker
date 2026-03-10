@@ -68,12 +68,19 @@ def write_initial_CGitp (resname, mapping,
         f.write(f"{resname}  1\n\n")
 
         f.write("[ atoms ]\n")
-        f.write("; nr type resnr residue atom cgnr charge mass\n")
+        f.write("; nr type resnr residue atom cgnr charge [mass]\n")
 
         for i, (bead_name, bead_def) in enumerate(beads.items(), 1):
             bead_type = bead_def.get("type", "TYPe")
             bead_charge = bead_def.get("charge", 0)
-            f.write(f"{i:4} {bead_type:4} {0:4} {resname:4} {bead_name:4} {i:4} {bead_charge:6}\n")
+            bead_mass = bead_def.get("mass")
+
+            if bead_mass is None:
+                f.write(f"{i:4} {bead_type:4} {0:4} {resname:4} {bead_name:4} "
+                        f"{i:4} {bead_charge:6}\n")
+            else:
+                f.write(f"{i:4} {bead_type:4} {0:4} {resname:4} {bead_name:4} "
+                        f"{i:4} {bead_charge:6} {bead_mass:8.1f}\n")
 
         # footer
         if footer_lines:
