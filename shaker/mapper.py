@@ -118,7 +118,7 @@ def map_aa2cg(gro, xtc, mapping,
     
     wrote_gro = False
     with md.Writer(out_xtc.as_posix(), n_beads) as W:
-        for ts in tqdm(u.trajectory):
+        for ts in tqdm(u.trajectory, desc="Mapping the trajectory"):
             for k, ag in enumerate(bead_agg):
                 ## we could add a com flag here.
                 coords[k] = ag.center_of_geometry()   

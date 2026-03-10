@@ -1,5 +1,5 @@
 import numpy as np
-from tqdm import tqdm 
+from tqdm.autonotebook import tqdm 
 
 def measure_bonded_terms (u, resname,
                           dist_tgts, ang_tgts, dihed_tgts, 
@@ -86,7 +86,7 @@ def measure_bonded_terms (u, resname,
     # print('Calculating distributions...')
     resids = np.unique(u.select_atoms(f'resname {resname}').resids)
     
-    for resid in tqdm(resids):
+    for resid in tqdm(resids, desc="Measuring Bonded parameters"):
         dists = [_beadstodistance(u, resid, resname, a, 
                                     resid, resname, b)
                  for (a, b) in dist_tgts]
