@@ -115,11 +115,21 @@ def run_SASA(name,
 
 
 def _write_cg_vdw (dir_out, bead_names, bead_sizes):
-    '''fuction to write the CG vdwradii.dat file for calculating SASA.'''
-    
-    sasa = open(dir_out+'/vdwradii.dat', 'w')
-    sasa.write(';CG van der walls radii\n')
-    for idx, bead in enumerate(bead_names):
-        size = _bead_sizes_dict[bead_sizes[idx]]
-        sasa.write('???  {}    {}\n'.format(bead, size))
-    sasa.close()
+    '''
+    Write a CG vdwradii.dat file for SASA calculations.
+
+    Bead sizes are mapped using `_bead_sizes_dict`. If a bead type is "U",
+    its radius is set to 0.
+    '''
+    out = Path(dir_out) / "vdwradii.dat"
+    with open(out, "w") as sasa:
+        sasa.write("; CG van der Waals radii :)\n")
+        for bead, btype in zip(bead_names, bead_sizes):
+            if btype == "U":
+                size = 0.0
+            else:
+                if btype not in _bead_sizes_dict:
+                    raise ValueError(f"Unknown bead size type '{btype}'")
+                size = _bead_sizes_dict[btype]
+
+            sasa.write(f"???  {bead:4}  {size:.3f}\n")

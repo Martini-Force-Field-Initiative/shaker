@@ -9,17 +9,22 @@ _bead_masses_dict = {'R': 72.,
 
 def _size_from_name(bead_types):
     '''
-    Function to convert list of bead types into a list of bead sizes (R,S,T).
+    Convert bead types into size classes (R, S, T, U).
+
+    U is treated as a special case (radius = 0).
     '''
-    extra_list = []
+    sizes = []
     for string in bead_types:
-        if string[0].upper() == 'S':  
-            extra_list.append('S')
-        elif string[0].upper() == 'T': 
-            extra_list.append('T')
-        else:  
-            extra_list.append('R')
-    return extra_list
+        t = string[0].upper()
+        if t == 'U':
+            sizes.append('U')
+        elif t == 'S':
+            sizes.append('S')
+        elif t == 'T':
+            sizes.append('T')
+        else:
+            sizes.append('R')
+    return sizes
 
 def _bead_mass_from_type(bead_type):
     '''
