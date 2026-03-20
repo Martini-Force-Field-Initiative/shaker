@@ -267,13 +267,10 @@ def fit_dihedral_workflow(bins, hist, tgt=None,
                                               w_temp_kj=w_temp_kj)
     model["potential"]        = potential
     model["smooth_potential"] = smooth_potential
-
-    print("#### Dihedral parameters")
     model["report"] = report_potentials(model, bins=bins, energy_kj=smooth_potential, return_pots=True)
-    # print(model["report"])
-    print("####")
 
     if plot:
+
         fit_data = evaluate_model(bins, model)
         title = '-'.join(tgt) if tgt is not None else "Dihedral fit"
         fig, ax = plt.subplots(1, 1, figsize=(6, 3))
@@ -287,6 +284,10 @@ def fit_dihedral_workflow(bins, hist, tgt=None,
         ax.set_xlim(-180, 180)
         fig.tight_layout()
         plt.show()
+
+        ## Also print the potential
+        for line in model["report"]:
+            print(line)
 
     return model
 
@@ -525,74 +526,3 @@ def report_potentials(best, bins=None, energy_kj=None, weights=None,
     else:
         for line in lines:
             print(line)
-
-    
-### Ryckhaert Belleman dihedral fitting
-def _rb_design_matrix(bins, max_power=5):
-    """Build design matrix for Ryckaert-Bellemans: V = Σ cₙ cosⁿ(ψ), ψ = θ - π."""
-    psi = np.deg2rad(np.asarray(bins, dtype=float)) - np.pi
-    return np.column_stack([np.cos(psi)**n for n in range(max_power + 1)])
-
-
-def fit_rb(bins, energy_kj, zero_min=True,
-           weight_mode="boltzmann", weights=None, w_temp_kj=2.5):
-    """
-    Fit a dihedral PMF to a Ryckaert-Bellemans potential.
-
-    V(θ) = Σ cₙ cosⁿ(ψ),  ψ = θ - π  (GROMACS convention)
-
-    Parameters
-    ----------
-    bins : array-like
-        Dihedral angle bin centres in degrees.
-    energy_kj : array-like
-        Potential energy in kJ/mol at each bin. NaN and inf are ignored.
-    zero_min : bool
-        Shift fitted potential so global minimum is zero. Default True.
-    weight_mode : {"boltzmann", "none"}
-        Weighting scheme. Default "boltzmann".
-    weights : array-like, optional
-        Custom per-point weights, e.g. histogram bin counts.
-    w_temp_kj : float
-        Effective temperature for Boltzmann weighting in kJ/mol. Default 2.5.
-
-    Returns
-    -------
-    dict with keys:
-        c : np.ndarray
-            Coefficients c0..c5 in kJ/mol.
-        rss_w : float
-            Weighted residual sum of squares.
-        weights_summary : dict
-            Records the weighting parameters used.
-    """
-    bins = np.asarray(bins, dtype=float)
-    energy_kj = np.asarray(energy_kj, dtype=float)
-
-    msk = np.isfinite(bins) & np.isfinite(energy_kj)
-    x, y = bins[msk], energy_kj[msk]
-    if len(y) == 0:
-        raise ValueError("No valid data points.")
-
-    w_input = np.asarray(weights)[msk] if (weights is not None
-        and len(np.asarray(weights)) == len(energy_kj)) else weights
-    w = _make_weights(y, weight_mode=weight_mode, weights=w_input, w_temp_kj=w_temp_kj)
-    sqrtw = np.sqrt(w)
-
-    X = _rb_design_matrix(x)
-    c, *_ = np.linalg.lstsq(X * sqrtw[:, None], y * sqrtw, rcond=None)
-    rss_w = float(np.sum(w * (y - X @ c)**2))
-
-    if zero_min:
-        theta_grid = np.linspace(-180, 180, 4001)
-        Vg = _rb_design_matrix(theta_grid) @ c
-        c[0] -= np.min(Vg)
-
-    return dict(c=c, rss_w=rss_w,
-                weights_summary=dict(mode=weight_mode, Tw=w_temp_kj))
-
-
-def report_rb(best, decimals=6):
-    """Print RB coefficients c0..c5 in kJ/mol, ready for GROMACS .itp."""
-    for i, ci in enumerate(best["c"]):
-        print(f"c{i} = {ci:.{decimals}f}  ; kJ/mol")

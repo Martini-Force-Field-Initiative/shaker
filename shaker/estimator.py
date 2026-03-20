@@ -1,8 +1,10 @@
 import numpy as np
 from .measurer import measure_bonded_terms
+from .dihedral_fitting import fit_dihedral_workflow
 
 def bonded_estimator(universe, resname,
                      dist_tgts=None, ang_tgts=None,
+                     harm_dihed_tgts=None, imp_dihed_tgts=None,
                      T=300,
                      constraint_threshold=25000,
                      start=0, stop=None, stride=1,
@@ -12,9 +14,9 @@ def bonded_estimator(universe, resname,
     initial GROMACS bonded parameters.
 
     This is a convenience wrapper around `measure_bonded_terms` and
-    `_estimate_bonded_from_dict`. It measures the requested bond and angle
-    targets, estimates harmonic parameters from the resulting distributions,
-    and returns GROMACS-formatted topology text.
+    `_estimate_bonded_from_dict`. It measures the requested bonded targets,
+    estimates parameters from the resulting distributions, and returns
+    GROMACS-formatted topology text.
 
     Parameters
     ----------
@@ -23,9 +25,17 @@ def bonded_estimator(universe, resname,
     resname : str
         Residue name of the mapped molecule to analyze.
     dist_tgts : sequence of sequence of str, optional
-        Bond targets to estimate.
+        Bond targets to estimate. Each entry is a pair of bead names.
     ang_tgts : sequence of sequence of str, optional
-        Angle targets to estimate.
+        Angle targets to estimate. Each entry is a triplet of bead names.
+    harm_dihed_tgts : sequence of sequence of str, optional
+        Proper dihedral targets to fit. Each entry is a quartet of bead names.
+        Fitted using the full dihedral workflow (inverted Boltzmann → smooth → fit)
+        and written as type 9 (multiple terms per quartet).
+    imp_dihed_tgts : sequence of sequence of str, optional
+        Improper dihedral targets to estimate. Each entry is a quartet of bead names.
+        Parameters estimated from the angle distribution via the equipartition
+        theorem and written as type 2 (harmonic improper).
     T : float, optional
         Temperature in Kelvin. Default is 300.
     constraint_threshold : float, optional
@@ -45,14 +55,19 @@ def bonded_estimator(universe, resname,
     -------
     str
         GROMACS-formatted topology text containing `[ bonds ]`,
-        `[ constraints ]`, and `[ angles ]` sections.
+        `[ constraints ]`, `[ angles ]`, and `[ dihedrals ]` sections,
+        depending on which targets were provided.
     """
 
     if dist_tgts is None:
         dist_tgts = []
     if ang_tgts is None:
         ang_tgts = []
-
+    if harm_dihed_tgts is None:
+        harm_dihed_tgts = []
+    if imp_dihed_tgts is None:
+        imp_dihed_tgts = []
+        
     bead_index = None
     if use_indices:
         residues = universe.select_atoms(f"resname {resname}").residues
@@ -61,13 +76,14 @@ def bonded_estimator(universe, resname,
         bead_index = {atom.name: i + 1 for i, atom in enumerate(residues[0].atoms)}
 
     bonded_dist = measure_bonded_terms(universe, resname,
-                                        dist_tgts, ang_tgts, [],
+                                        dist_tgts, ang_tgts, harm_dihed_tgts+imp_dihed_tgts,
                                         start=start, stop=stop, stride=stride)
 
     return _estimate_bonded_from_dict(
         bonded_dist,
         dist_tgts=dist_tgts,
         ang_tgts=ang_tgts,
+        harm_dihed_tgts=harm_dihed_tgts, imp_dihed_tgts=imp_dihed_tgts,
         T=T,
         constraint_threshold=constraint_threshold,
         bead_index=bead_index,
@@ -75,7 +91,8 @@ def bonded_estimator(universe, resname,
 
 
 def _estimate_bonded_from_dict(AA_bonded,
-                               dist_tgts=None, ang_tgts=None,
+                               dist_tgts=None, ang_tgts=None, 
+                               harm_dihed_tgts=None, imp_dihed_tgts=None, plot_dihed=True,
                                T=300, dist_units="A", ang_units="deg",
                                constraint_threshold=25000,
                                bead_index=None, use_indices=False):
@@ -88,9 +105,20 @@ def _estimate_bonded_from_dict(AA_bonded,
     AA_bonded : dict
         Output dictionary from `measure_bonded_terms`.
     dist_tgts : sequence of sequence of str, optional
-        Bond targets to estimate.
+        Bond targets to estimate. Each entry is a pair of bead names.
     ang_tgts : sequence of sequence of str, optional
-        Angle targets to estimate.
+        Angle targets to estimate. Each entry is a triplet of bead names.
+    harm_dihed_tgts : sequence of sequence of str, optional
+        Proper dihedral targets to fit. Each entry is a quartet of bead names.
+        Fitted using the full dihedral workflow (inverted Boltzmann → smooth → fit)
+        and written as type 9 (multiple terms per quartet).
+    imp_dihed_tgts : sequence of sequence of str, optional
+        Improper dihedral targets to estimate. Each entry is a quartet of bead names.
+        Parameters estimated from the angle distribution via the equipartition
+        theorem and written as type 2 (harmonic improper).
+    plot_dihed : bool, optional
+        If True, plot the raw potential, smoothed potential, and fit for each
+        proper dihedral. Default is True.
     T : float, optional
         Temperature in Kelvin. Default is 300.
     dist_units : {"nm", "A"}, optional
@@ -109,14 +137,19 @@ def _estimate_bonded_from_dict(AA_bonded,
     Returns
     -------
     str
-        A string containing GROMACS-formatted `[ bonds ]`, `[ constraints ]`,
-        and `[ angles ]` sections.
+        GROMACS-formatted topology text containing `[ bonds ]`,
+        `[ constraints ]`, `[ angles ]`, and `[ dihedrals ]` sections,
+        depending on which targets were provided.
     """
 
     if dist_tgts is None:
         dist_tgts = []
     if ang_tgts is None:
         ang_tgts = []
+    if harm_dihed_tgts is None:
+        harm_dihed_tgts = []
+    if imp_dihed_tgts is None:
+        imp_dihed_tgts = []
 
     if use_indices and bead_index is None:
         raise ValueError("bead_index must be provided when use_indices=True")
@@ -134,11 +167,22 @@ def _estimate_bonded_from_dict(AA_bonded,
                 raise ValueError(f"Angle target {[a, b, c]} contains bead names not found in bead_index")
             return f"{bead_index[a]:4d} {bead_index[b]:4d} {bead_index[c]:4d}", f"{a}-{b}-{c}"
         return f"{a:>6} {b:>6} {c:>6}", None
-
+        
+    def _fmt_dihedral(a, b, c, d):
+        if use_indices:
+            for bead in [a, b, c, d]:
+                if bead not in bead_index:
+                    raise ValueError(f"Dihedral target {[a,b,c,d]} contains bead name '{bead}' not found in bead_index")
+            return (f"{bead_index[a]:4d} {bead_index[b]:4d} "
+                    f"{bead_index[c]:4d} {bead_index[d]:4d}"), f"{a}-{b}-{c}-{d}"
+        return f"{a:>6} {b:>6} {c:>6} {d:>6}", None
+        
     bond_lines = []
     constraint_lines = []
     angle_lines = []
-
+    harm_dihed_lines = []
+    imp_dihed_lines = []
+    
     if dist_tgts:
         aa_dist_targets = [list(t) for t in AA_bonded["distances"]["targets"]]
         bins_dist = AA_bonded["distances"]["bins"]
@@ -187,6 +231,49 @@ def _estimate_bonded_from_dict(AA_bonded,
                 line += f" ; {comment}"
             angle_lines.append(line)
 
+    
+    if harm_dihed_tgts or imp_dihed_tgts:
+        aa_dih_targets = [list(t) for t in AA_bonded["dihedrals"]["targets"]]
+        bins_dih = AA_bonded["dihedrals"]["bins"]
+        hists_dih = AA_bonded["dihedrals"]["hist"]
+        
+    if harm_dihed_tgts:
+        for tgt in harm_dihed_tgts:
+            tgt = list(tgt)
+            if tgt not in aa_dih_targets:
+                raise ValueError(f"Dihedral target {tgt} not found in AA_bonded['dihedrals']['targets']")
+
+            idx = aa_dih_targets.index(tgt)
+            ijkl, comment = _fmt_dihedral(tgt[0], tgt[1], tgt[2], tgt[3])
+
+            model = fit_dihedral_workflow(bins_dih, hists_dih[idx], tgt=tgt, plot=plot_dihed)
+
+            # first line has RMSE appended — strip it for the topology
+            harm_dihed_lines.append(f"; {comment or '-'.join(tgt)}")
+            for i, term in enumerate(model['report']):
+                phase, k, mult = term.split()[:3]
+                line = f"{ijkl}   9   {float(phase):8.2f}   {float(k):10.4f}   {int(mult)}"
+                if i == 0 and comment:
+                    line += f" ; {comment}"
+                harm_dihed_lines.append(line)
+            harm_dihed_lines.append("")
+
+    if imp_dihed_tgts:
+        for tgt in imp_dihed_tgts:
+            tgt = list(tgt)
+            if tgt not in aa_dih_targets:
+                raise ValueError(f"Improper dihedral target {tgt} not found in AA_bonded['dihedrals']['targets']")
+
+            idx = aa_dih_targets.index(tgt)
+            ijkl, comment = _fmt_dihedral(tgt[0], tgt[1], tgt[2], tgt[3])
+            theta0, ktheta = _estimate_angle_params_from_hist(
+                bins_dih, hists_dih[idx], T=T, units="deg")
+
+            line = f"{ijkl}   2   {theta0:8.2f}   {ktheta:10.4f}"
+            if comment:
+                line += f" ; {comment}"
+            imp_dihed_lines.append(line)
+    
     lines = []
     if bond_lines:
         lines.append("[ bonds ]")
@@ -215,6 +302,23 @@ def _estimate_bonded_from_dict(AA_bonded,
         lines.extend(angle_lines)
         lines.append("")
 
+    if harm_dihed_lines or imp_dihed_lines:
+        lines.append("[ dihedrals ]")
+        if harm_dihed_lines:
+            if use_indices:
+                lines.append(";  i    j    k    l  funct     phase         k     mult ; beads")
+            else:
+                lines.append(";  i      j      k      l    funct     phase         k     mult")
+            lines.extend(harm_dihed_lines)
+        if imp_dihed_lines:
+            lines.append("; improper dihedrals")
+            if use_indices:
+                lines.append(";  i    j    k    l  funct     angle         k           ; beads")
+            else:
+                lines.append(";  i      j      k      l    funct     angle         k")
+            lines.extend(imp_dihed_lines)
+            lines.append("")
+        
     return "\n".join(lines)
     
 def _estimate_bond_params_from_hist(bins_x, hist, T=300, units="A"):
