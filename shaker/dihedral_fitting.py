@@ -460,11 +460,13 @@ def evaluate_model(bins, model):
 def report_potentials(best, bins=None, energy_kj=None, weights=None,
                       phase_range="-180_180", sort_by="multiplicity", decimals=3, return_pots=False):
     """
-    Print each fitted term as: refdegree, k, multiplicity
+    Format each fitted term as: refdegree, k, multiplicity
       - refdegree: δ (degrees) in 1+cos(nθ - δ)
       - k: amplitude in kJ/mol
       - multiplicity: integer n
-    Then prints RMSE (kJ/mol). If `weights` is provided, prints weighted RMSE.
+    Prints to stdout, or returns as a list of strings if return_pots=True.
+    If bins and energy_kj are provided, appends RMSE to the first line.
+    If `weights` is provided, computes weighted RMSE instead.
     """
     mults = best["mults"]
     ks = best["amps"]               # k in kJ/mol

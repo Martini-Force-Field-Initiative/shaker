@@ -4,7 +4,7 @@ from .dihedral_fitting import fit_dihedral_workflow
 
 def bonded_estimator(universe, resname,
                      dist_tgts=None, ang_tgts=None,
-                     harm_dihed_tgts=None, imp_dihed_tgts=None,
+                     harm_dihed_tgts=None, imp_dihed_tgts=None, plot_dihed=False,
                      T=300,
                      constraint_threshold=25000,
                      start=0, stop=None, stride=1,
@@ -84,6 +84,7 @@ def bonded_estimator(universe, resname,
         dist_tgts=dist_tgts,
         ang_tgts=ang_tgts,
         harm_dihed_tgts=harm_dihed_tgts, imp_dihed_tgts=imp_dihed_tgts,
+        plot_dihed=plot_dihed,
         T=T,
         constraint_threshold=constraint_threshold,
         bead_index=bead_index,
@@ -236,43 +237,41 @@ def _estimate_bonded_from_dict(AA_bonded,
         aa_dih_targets = [list(t) for t in AA_bonded["dihedrals"]["targets"]]
         bins_dih = AA_bonded["dihedrals"]["bins"]
         hists_dih = AA_bonded["dihedrals"]["hist"]
-        
-    if harm_dihed_tgts:
-        for tgt in harm_dihed_tgts:
-            tgt = list(tgt)
-            if tgt not in aa_dih_targets:
-                raise ValueError(f"Dihedral target {tgt} not found in AA_bonded['dihedrals']['targets']")
 
-            idx = aa_dih_targets.index(tgt)
-            ijkl, comment = _fmt_dihedral(tgt[0], tgt[1], tgt[2], tgt[3])
+        if harm_dihed_tgts:
+            for tgt in harm_dihed_tgts:
+                tgt = list(tgt)
+                if tgt not in aa_dih_targets:
+                    raise ValueError(f"Dihedral target {tgt} not found in AA_bonded['dihedrals']['targets']")
 
-            model = fit_dihedral_workflow(bins_dih, hists_dih[idx], tgt=tgt, plot=plot_dihed)
+                idx = aa_dih_targets.index(tgt)
+                ijkl, comment = _fmt_dihedral(tgt[0], tgt[1], tgt[2], tgt[3])
+                model = fit_dihedral_workflow(bins_dih, hists_dih[idx], tgt=tgt, plot=plot_dihed)
 
-            # first line has RMSE appended — strip it for the topology
-            harm_dihed_lines.append(f"; {comment or '-'.join(tgt)}")
-            for i, term in enumerate(model['report']):
-                phase, k, mult = term.split()[:3]
-                line = f"{ijkl}   9   {float(phase):8.2f}   {float(k):10.4f}   {int(mult)}"
-                if i == 0 and comment:
+                harm_dihed_lines.append(f"; {comment or '-'.join(tgt)}")
+                for i, term in enumerate(model['report']):
+                    phase, k, mult = term.split()[:3]
+                    line = f"{ijkl}   9   {float(phase):8.2f}   {float(k):10.4f}   {int(mult)}"
+                    if i == 0 and comment:
+                        line += f" ; {comment}"
+                    harm_dihed_lines.append(line)
+                harm_dihed_lines.append("")
+
+        if imp_dihed_tgts:
+            for tgt in imp_dihed_tgts:
+                tgt = list(tgt)
+                if tgt not in aa_dih_targets:
+                    raise ValueError(f"Improper dihedral target {tgt} not found in AA_bonded['dihedrals']['targets']")
+
+                idx = aa_dih_targets.index(tgt)
+                ijkl, comment = _fmt_dihedral(tgt[0], tgt[1], tgt[2], tgt[3])
+                theta0, ktheta = _estimate_angle_params_from_hist(
+                    bins_dih, hists_dih[idx], T=T, units="deg")
+
+                line = f"{ijkl}   2   {theta0:8.2f}   {ktheta:10.4f}"
+                if comment:
                     line += f" ; {comment}"
-                harm_dihed_lines.append(line)
-            harm_dihed_lines.append("")
-
-    if imp_dihed_tgts:
-        for tgt in imp_dihed_tgts:
-            tgt = list(tgt)
-            if tgt not in aa_dih_targets:
-                raise ValueError(f"Improper dihedral target {tgt} not found in AA_bonded['dihedrals']['targets']")
-
-            idx = aa_dih_targets.index(tgt)
-            ijkl, comment = _fmt_dihedral(tgt[0], tgt[1], tgt[2], tgt[3])
-            theta0, ktheta = _estimate_angle_params_from_hist(
-                bins_dih, hists_dih[idx], T=T, units="deg")
-
-            line = f"{ijkl}   2   {theta0:8.2f}   {ktheta:10.4f}"
-            if comment:
-                line += f" ; {comment}"
-            imp_dihed_lines.append(line)
+                imp_dihed_lines.append(line)
     
     lines = []
     if bond_lines:
