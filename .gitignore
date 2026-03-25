@@ -9,3 +9,13 @@ __pycache__/
 *.pyo
 
 .git/
+
+# Ignore everything (output) in the 1_BasicParameterization and AA-reference directories 
+tutorials/1_BasicParameterization/*
+tutorials/AA_references/BasicParam/*
+
+# Except for the notebook and the structure and trajectory files
+!tutorials/1_BasicParameterization/Basic_parameterization.ipynb
+!tutorials/AA_references/AA.pdb
+!tutorials/AA_references/AA.xtc
+!tutorials/AA_references/initial_itp.itp
