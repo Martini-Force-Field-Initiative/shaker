@@ -9,7 +9,7 @@ import shlex
 
 def prepare_setup_water(initial_structure, structure_itp='initial_CG.itp',
                         n_mols=1, box_size=4, 
-                        FFitp=None, SolvITP=None, IonsITP=None,
+                        FFitp=None, SolvITP=None, IonsITP=None,resname=None,
                         NaCL_Conc=0.15, gmx_loc=''):
     '''
     Prepare a solvated Martini 3 simulation system for a coarse-grained molecule.
@@ -74,7 +74,8 @@ def prepare_setup_water(initial_structure, structure_itp='initial_CG.itp',
     waterbox = files("shaker.data.itps") / "water.gro"
 
     ## Prepare top file
-    resname = np.unique(md.Universe(initial_structure).residues.resnames)[0]
+    if not resname:
+        resname = np.unique(md.Universe(initial_structure).residues.resnames)[0]
     
     topinput = open('topol.top', 'w')
     topinput.write(f'#include "{FFitp}"\n')

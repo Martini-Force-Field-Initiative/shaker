@@ -1,57 +1,89 @@
 from pathlib import Path
 
-def write_initial_CGitp (resname, 
-                         bead_names, bead_types, bead_charges, 
-                         filename="initial_CG.itp", header=''):
-    
+def write_initial_CGitp (resname, mapping, 
+                         filename="initial_CG.itp",
+                         header=None, footer=None):    
     """
     Write an initial CG topology file (.itp).
 
     This function generates a minimal Martini-compatible `.itp` file
     describing a single CG molecule. The topology contains a `[ moleculetype ]`
     section and an `[ atoms ]` section populated from the provided bead
-    definitions. Empty `[ bonds ]` and `[ angles ]` sections are included as
-    placeholders for subsequent parameterization.
+    definitions. 
 
     Parameters
     ----------
     resname : str
         Residue name of the CG molecule.
-    bead_names : sequence of str
-        Names of the CG beads in the order they appear in the topology.
-    bead_types : sequence of str
-        Martini bead types corresponding to each bead.
-    bead_charges : sequence of float
-        Partial charges assigned to each bead.
+    mapping : dict
+        Mapping dictionary in SHAKER format. The expected structure is::
+
+            mapping = {
+                "RESNAME": {
+                    "BEAD1": {"type": "TC1", "charge": 0, "atoms": [...]},
+                    "BEAD2": {"atoms": [...]},
+                }
+            }
+
+        Only `mapping[resname]` is used by this function.
+        If a bead does not define a `"type"` entry, the placeholder `"TYPe"`
+        is used. If a bead does not define a `"charge"` entry, the value `0`
+        is used.
     filename : str or Path, optional
         Output filename of the generated `.itp` topology file.
         The file will be overwritten if it already exists.
         Default is `"initial_CG.itp"`.
-    header : str, optional
-        Optional text written at the top of the `.itp` file (e.g. comments,
-        metadata, or parameterization notes).
+    header : str or sequence of str, optional
+        Text written at the top of the file.
+    footer : str or sequence of str, optional
+        Text written at the end of the file.
 
     """
 
-    ## Run some quick checks.
-    if not (len(bead_names) == len(bead_types) == len(bead_charges)):
-        raise ValueError("bead_names, bead_types and bead_charges must have the same length")
+    if resname not in mapping:
+        raise ValueError(f"No mapping found for resname '{resname}'")
+        
     filename = Path(filename).resolve()
+    beads = mapping[resname]
+    
+    def _normalize(x):
+        if x is None:
+            return []
+        if isinstance(x, str):
+            return [x]
+        return list(x)
 
-    ## Write the file
+    header_lines = _normalize(header)
+    footer_lines = _normalize(footer)
+    
     with open(filename, "w") as f:
-        f.write(f"{header}\n\n")
+
+        # header
+        for line in header_lines:
+            f.write(f"{line}\n")
+        if header_lines:
+            f.write("\n")
+
         f.write("[ moleculetype ]\n")
         f.write(f"{resname}  1\n\n")
 
         f.write("[ atoms ]\n")
-        f.write("; nr type resnr residue atom cgnr charge mass\n")
+        f.write("; nr type resnr residue atom cgnr charge [mass]\n")
 
-        for i, (name, typ, charge) in enumerate(zip(bead_names, bead_types, bead_charges), 1):
-            f.write(f"{i:4} {typ:4} {0:4} {resname:4} {name:4} {i:4} {charge:6}\n")
+        for i, (bead_name, bead_def) in enumerate(beads.items(), 1):
+            bead_type = bead_def.get("type", "TYPe")
+            bead_charge = bead_def.get("charge", 0)
+            bead_mass = bead_def.get("mass")
 
-        f.write("\n[ bonds ]\n")
-        f.write("; i  j  funct length\n\n")
+            if bead_mass is None:
+                f.write(f"{i:4} {bead_type:4} {0:4} {resname:4} {bead_name:4} "
+                        f"{i:4} {bead_charge:6}\n")
+            else:
+                f.write(f"{i:4} {bead_type:4} {0:4} {resname:4} {bead_name:4} "
+                        f"{i:4} {bead_charge:6} {bead_mass:8.1f}\n")
 
-        f.write("[ angles ]\n")
-        f.write("; i  j  k  funct  angle  force.c.\n\n")
+        # footer
+        if footer_lines:
+            f.write("\n")
+            for line in footer_lines:
+                f.write(f"{line}\n")

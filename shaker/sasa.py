@@ -2,7 +2,7 @@ import MDAnalysis as md
 from importlib.resources import files
 import os 
 import subprocess
-from .helper import bead_sizes_dict, size_from_name
+from .helper import _bead_sizes_dict, _size_from_name
 from pathlib import Path
 
 '''
@@ -14,33 +14,44 @@ Mostly wrappers for GROMACS' `gmx sasa` tool.
 def run_SASA(name, 
              gro, xtc, 
              resname, 
-             isCG=False, bead_names=None, bead_types=None, 
+             isCG=False, mapping=None, 
              dir_out='.', 
              selection='all',
              gmx_loc=''):
     
     '''
-    Wrapper for gmx SASA. Simplifies handling of CG sims and vdw radii files.
-        ----------
+    This is a wrapper around `gmx sasa` that simplifies SASA analysis for
+    both atomistic and coarse-grained systems. For coarse-grained systems,
+    a custom van der Waals radii file is generated from the supplied bead
+    names and bead types.
+    
+    ----------
     name : str
-        Handle for particular analysis.
+            Name/handle for this analysis. Used to create the output directory
+            `dir_out/SASA/<name>/`.
     gro : str
         Directory to .gro structure file for analysis.
     xtc : str
         Directory to .xtc structure file for analysis.
     resname : str
         Resname of target molecule to analyse.
-    isCG : Bool
-        True if analysing CG molecule. Requires `bead_names` and `bead_types`.
-    bead_names : list
-        List of CG bead names for the target molecule.
-    bead_types : list
-        List of CG bead types for the target molecule. Used to define bead size.
-    selection : str
-        Selection string for the target molecule. Used to exclude parts of the 
-        molecule from analysis.
-    gmx_loc : str
-        Directory to gmx compilation.
+    isCG : bool, optional
+        If True, prepare a CG-specific van der Waals radii file. Requires
+        `bead_names` and `bead_types`. Default is False.
+    mapping : dict, optional
+        Mapping dictionary in SHAKER format. Required when `isCG=True`.
+        The bead names and bead types are extracted from `mapping[resname]`
+        to generate the CG van der Waals radii file.
+    selection : str, optional
+        Additional atom selection applied within the first residue matching
+        `resname`. Can be used to exclude parts of the molecule from analysis.
+        Default is "all".
+    gmx_loc : str, optional
+        Prefix/path to the GROMACS executable directory.
+    
+    Notes
+    -----
+    - This function currently analyzes only the first residue matching `resname`.
     '''
     ## normalize paths
     gro = Path(gro).resolve()
@@ -59,9 +70,14 @@ def run_SASA(name,
 
     ## Prepare vdw radii file.
     if isCG:
-        if bead_names is None or bead_types is None:
-            raise ValueError("When isCG=True, both 'bead_names' and 'bead_types' must be provided.")
-        bead_sizes = size_from_name(bead_types)
+        if mapping is None:
+            raise ValueError("When isCG=True, a mapping dictionary must be provided.")
+        if resname not in mapping:
+            raise ValueError(f"No mapping found for resname '{resname}'")
+    
+        bead_names = list(mapping[resname].keys())
+        bead_types = [bead["type"] for bead in mapping[resname].values()]
+        bead_sizes = _size_from_name(bead_types)
         _write_cg_vdw(dir_writing, bead_names, bead_sizes)
     else: # Most likely AA.
         vdwloc = files("shaker.data.vdw") / "vdwradii_AA.dat"
@@ -99,11 +115,21 @@ def run_SASA(name,
 
 
 def _write_cg_vdw (dir_out, bead_names, bead_sizes):
-    '''fuction to write the CG vdwradii.dat file for calculating SASA.'''
-    
-    sasa = open(dir_out+'/vdwradii.dat', 'w')
-    sasa.write(';CG van der walls radii\n')
-    for idx, bead in enumerate(bead_names):
-        size = bead_sizes_dict[bead_sizes[idx]]
-        sasa.write('???  {}    {}\n'.format(bead, size))
-    sasa.close()
+    '''
+    Write a CG vdwradii.dat file for SASA calculations.
+
+    Bead sizes are mapped using `_bead_sizes_dict`. If a bead type is "U",
+    its radius is set to 0.
+    '''
+    out = Path(dir_out) / "vdwradii.dat"
+    with open(out, "w") as sasa:
+        sasa.write("; CG van der Waals radii :)\n")
+        for bead, btype in zip(bead_names, bead_sizes):
+            if btype == "U":
+                size = 0.0
+            else:
+                if btype not in _bead_sizes_dict:
+                    raise ValueError(f"Unknown bead size type '{btype}'")
+                size = _bead_sizes_dict[btype]
+
+            sasa.write(f"???  {bead:4}  {size:.3f}\n")
