@@ -4,6 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib as mpl
+import matplotlib.patches as mpatches
+import matplotlib.lines as mlines
 import warnings
 
 mpl.rcParams['figure.dpi'] = 150
@@ -22,6 +24,12 @@ def plot_sasa_dir(root="./SASA",
     to represent a different model or simulation condition. The SASA values
     and associated errors are extracted and displayed as a bar plot for
     comparison.
+
+    If a subdirectory named "AA" is present, coloured background bands are
+    drawn to indicate the percentage deviation from the AA reference value:
+    green (0–5 %), orange (5–10 %), and red (>10 %, extending to zero).
+    A dashed horizontal line marks the AA reference value. A legend is added
+    explaining the colour coding.
 
     Parameters
     ----------
@@ -48,26 +56,80 @@ def plot_sasa_dir(root="./SASA",
     specified `.xvg` file. The label used in the bar plot corresponds to
     the name of the subdirectory.
 
+    The y-axis runs from 0 to 10 % above the largest value + error across
+    all datasets.
+
     The resulting figure is saved as `SASABar.png`.
     '''
     root = Path(root)
     items = [(d.name, *_read_SASA_xvg(d / xvg))
              for d in sorted(root.iterdir())
              if d.is_dir() and (d / xvg).exists()]
-
     names, vals, errs = zip(*items)
-
     x = np.arange(len(names))
+
     fig, ax = plt.subplots(
-        figsize=(max(6, 0.8*len(names)), 4),
+        figsize=(max(6, 0.8 * len(names)), 4),
         tight_layout=True)
 
-    ax.bar(x, vals, yerr=errs, capsize=5)
-    ax.set_xticks(x)
-    ax.set_xticklabels(names, rotation=30, ha="right")
-    ax.set_ylabel("SASA (nm$^2$)", fontweight='bold')
-    fig.savefig("SASABar.png", dpi=300, transparent=True, bbox_inches='tight')
+    # y-axis limits 
+    y_max = max(v + e for v, e in zip(vals, errs))
+    ax.set_ylim(0, y_max * 1.10)
 
+    # AA reference bands 
+    aa_val = None
+    if "AA" in names:
+        aa_val = vals[names.index("AA")]
+
+    legend_patches = []
+    if aa_val is not None:
+        bands = [
+            (0.00, 0.05, "#2ecc71", "0–5 % from AA"),
+            (0.05, 0.10, "#e67e22", "5–10 % from AA"),
+            (0.10, None, "#e74c3c", ">10 % from AA"),
+        ]
+        for lo, hi, color, label in bands:
+            if hi is None:
+                # red band: from 0 up to the 10 % boundary
+                ax.axhspan(0, aa_val * (1 - lo),
+                           color=color, alpha=0.15, zorder=0)
+                ax.axhspan(aa_val * (1 + lo), y_max * 1.10,
+                           color=color, alpha=0.15, zorder=0)
+            else:
+                ax.axhspan(aa_val * (1 - hi), aa_val * (1 - lo),
+                           color=color, alpha=0.15, zorder=0)
+                ax.axhspan(aa_val * (1 + lo), aa_val * (1 + hi),
+                           color=color, alpha=0.15, zorder=0)
+
+            legend_patches.append(
+                mpatches.Patch(facecolor=color, alpha=0.4,
+                               edgecolor="none", label=label))
+
+        ax.axhline(aa_val, color="dimgrey", lw=1.2,
+                   ls="--", zorder=1, alpha=0.7)
+        legend_patches.insert(0,
+            mlines.Line2D([], [], color="dimgrey", lw=1.2,
+                          ls="--", alpha=0.7, label="AA reference"))
+
+    # bars 
+    ax.bar(x, vals,
+           yerr=errs,
+           capsize=7,
+           error_kw=dict(elinewidth=1.8, ecolor="dimgrey", capthick=1.8),
+           color="#888888",
+           edgecolor="#bbbbbb",
+           linewidth=1.2,
+           zorder=2)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, rotation=30, ha="right", fontweight="bold")
+    ax.set_ylabel("SASA (nm$^2$)", fontweight="bold")
+
+    if legend_patches:
+        ax.legend(handles=legend_patches, loc="lower left",
+                  framealpha=0.8, fontsize=8)
+
+    fig.savefig("SASABar.png", dpi=300, transparent=True, bbox_inches="tight")
     return fig, ax, items
 
 
