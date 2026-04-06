@@ -7,6 +7,12 @@ _bead_masses_dict = {'R': 72.,
                    'S': 54.,
                    'T': 36.}
 
+_BEAD_RATIOS = {"regular": 4,
+                "small":   3,
+                "tiny":    2,}
+
+_size_label = {"R": "regular", "S": "small", "T": "tiny", "U": "virtual"}
+
 def _size_from_name(bead_types):
     '''
     Convert bead types into size classes (R, S, T, U).
