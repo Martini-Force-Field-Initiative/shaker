@@ -114,14 +114,15 @@ def _write_mapping_report(u, mapping, outdir, outname, verbose=True):
     with open(log_path, "w") as f:
         f.write(report_str)
 
-    print(f"Mapping log written to {log_path}")
+    print(f"Mapping log written to {log_path}\n")
 
     if verbose:
         print(report_str)
 
 
 def map_aa2cg(gro, xtc, mapping,
-              outname="cg_mapped", outdir=".", report=True, verbose=True):
+              outname="cg_mapped", outdir=".",
+              report=True, verbose=True):
     '''
     Map an atomistic trajectory to a coarse-grained representation.
 
