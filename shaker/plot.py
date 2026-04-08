@@ -310,7 +310,7 @@ def plot_bonded_distributions(*bonded_dicts,
             ref_bins = ref[cat]["bins"]
             ref_hist = np.asarray(ref[cat]["hist"][i])
 
-            # --- plot reference (dataset 0) ---
+            # plot reference (dataset 0)
             ax.plot(ref_bins, ref_hist, label=labels[0], color=resolved_colors[0])
 
             if show_peaks and len(ref_hist) > 0:
@@ -322,7 +322,7 @@ def plot_bonded_distributions(*bonded_dicts,
                     fontsize=6, va="bottom", ha="center",
                 )
 
-            # --- plot subsequent datasets, optionally compute metrics vs reference ---
+            # plot subsequent datasets, optionally compute metrics vs reference 
             # Each entry is (text, color) so each comparison gets its own colour.
             metrics_lines = []
 
@@ -372,7 +372,7 @@ def plot_bonded_distributions(*bonded_dicts,
                         (f"{label}  W={w_dist:.3f}  OC={oc:.3f}  {status}", line_color)
                     )
 
-            # Annotate metrics in the upper-right corner — one text call per line
+            # Annotate metrics in the upper-right corner, one text call per line
             # so each comparison carries its own colour.
             if metrics and metrics_lines:
                 line_height = 0.08
