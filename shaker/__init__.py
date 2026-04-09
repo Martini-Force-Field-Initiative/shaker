@@ -2,7 +2,7 @@ from importlib.metadata import version
 __version__ = version("shaker")
 
 from . import (dihedral_fitting, itp, mapper, measurer, sasa, system_builders,
-               vsites, helper, plot, render, vmd_render, estimator, overlap)
+               vsites, helper, plot, render, estimator, overlap)
 from .mapper import map_aa2cg
 from .render import (render_2dMapping, render_mapping, render_connely_surface,
                      render_ensemble)
