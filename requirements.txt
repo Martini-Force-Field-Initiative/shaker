@@ -1,0 +1,8 @@
+numpy
+matplotlib 
+scipy
+pathlib
+mdanalyis
+tqdm
+nglview
+rdkit
