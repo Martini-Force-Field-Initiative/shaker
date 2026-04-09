@@ -14,7 +14,7 @@ It provides modular utilities for mapping atomistic trajectories to CG represent
 - **Dihedral Fitting** — Advanced dihedral fitting with Savitzky-Golay smoothing and multi-term cosine series
 - **SASA** — Compute solvent-accessible surface areas with CG-specific van der Waals radii
 - **Virtual Sites** — Generate and optimize type-3 virtual site definitions
-- **Overlap Analysis** — Quantify bead overlap for CG model validation
+- **Model Quality Assessment** — Evaluate CG model accuracy via pairwise intra-bead distance overlap matrices and ensemble visualization
 - **System Setup** — Build solvated Martini simulation boxes and run GROMACS minimization/production MD with minimal boilerplate
 - **Visualization** — Render 3D mapping overlays, Connolly surfaces, molecular ensembles, and 2D chemical structures
 
@@ -80,8 +80,6 @@ topology_text = shaker.bonded_estimator(
     u, resname="MOL",
     dist_tgts=[("B1", "B2"), ("B2", "B3")],
     ang_tgts=[("B1", "B2", "B3")],
-    harm_dihed_tgts=[],
-    T=300,
 )
 
 print(topology_text)
@@ -121,14 +119,12 @@ aa_bonded = shaker.measure_bonded_terms(
     u_aa, resname="MOL",
     dist_tgts=[("B1", "B2"), ("B2", "B3")],
     ang_tgts=[("B1", "B2", "B3")],
-    dihed_tgts=[],
 )
 
 cg_bonded = shaker.measure_bonded_terms(
     u_cg, resname="MOL",
     dist_tgts=[("B1", "B2"), ("B2", "B3")],
     ang_tgts=[("B1", "B2", "B3")],
-    dihed_tgts=[],
 )
 
 fig = shaker.plot_bonded_distributions(
@@ -191,4 +187,4 @@ Step-by-step Jupyter notebooks are available in [`tutorials/`](tutorials/):
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+LGPLv2.1 License. See [LICENSE](LICENSE) for details.
