@@ -85,8 +85,7 @@ topology_text = shaker.bonded_estimator(
 print(topology_text)
 ```
 
-`bonded_estimator` measures distributions, applies the equipartition theorem for
-bonds and angles, fits dihedrals via inverted Boltzmann, and returns
+`bonded_estimator` measures distributions, applies the equipartition theorem for bonds and angles, fits dihedrals via inverted Boltzmann, and returns
 GROMACS-formatted topology lines ready to paste into an `.itp` file.
 
 ### 3. Write an initial topology file
