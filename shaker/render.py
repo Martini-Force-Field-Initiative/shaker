@@ -1,5 +1,6 @@
 from collections import Counter
 from pathlib import Path
+import warnings
 
 import nglview as nv
 import numpy as np
@@ -44,15 +45,13 @@ def render_mapping(cg_mapped_gro, cg_mapped_xtc,
     -------
     nglview.NGLWidget
         Interactive viewer containing the AA and CG trajectories overlayed.
-
     """
     
     cg_mapped_gro = Path(cg_mapped_gro).resolve()
     cg_mapped_xtc = Path(cg_mapped_xtc).resolve()
     aa_gro = Path(aa_gro).resolve()
     aa_xtc = Path(aa_xtc).resolve()
-    
-    view = nv.NGLWidget()
+
     u_aa = md.Universe(str(aa_gro), str(aa_xtc))
     u_cg = md.Universe(str(cg_mapped_gro), str(cg_mapped_xtc))
 
@@ -60,14 +59,10 @@ def render_mapping(cg_mapped_gro, cg_mapped_xtc,
     view.add_trajectory(u_aa)
     view.add_trajectory(u_cg)
 
-    # clear defaults
     view[0].clear_representations()
     view[1].clear_representations()
-    
-    # atomistic molecule
-    view[0].add_representation("ball+stick", selection="NOT DOT")
 
-    # CG molecule
+    view[0].add_representation("ball+stick", selection="NOT DOT")
     view[1].add_representation("spacefill", selection="NOT DOT", opacity=1.0, radius=.9)
 
     view.center()
@@ -77,29 +72,37 @@ def render_mapping(cg_mapped_gro, cg_mapped_xtc,
 
     return view
 
-def render_connely_surface(SASA_folder='./SASA', size='900px'):
+
+def render_connely_surface(SASA_folder='./SASA', aa_subfolder='AA',
+                           cg_subfolder='CG_Mapped', size='900px'):
     """
     Render overlapping Connolly (SASA) surfaces for atomistic and coarse-grained models.
 
     This function loads two structures containing precomputed SASA dot surfaces
     (typically generated with `gmx sasa`). The atomistic (AA) and coarse-grained (CG)
-    systems are displayed together to visually compare their connely surfaces.
+    systems are displayed together to visually compare their Connolly surfaces.
 
     Parameters
     ----------
     SASA_folder : str or Path, optional
         Directory containing the SASA surface files. The function expects
-        the following structure:
+        the following structure::
 
             SASA_folder/
-                AA/surface.pdb
-                CG/surface.pdb
+                <aa_subfolder>/surface.pdb
+                <cg_subfolder>/surface.pdb
 
-        Each `surface.pdb` must contain the molecular coordinates and
-        pseudo-atoms with residue name `DOT` representing the sampled
+        Each ``surface.pdb`` must contain the molecular coordinates and
+        pseudo-atoms with residue name ``DOT`` representing the sampled
         Connolly surface.
+    aa_subfolder : str, optional
+        Name of the subdirectory containing the AA surface file.
+        Default is ``'AA'``.
+    cg_subfolder : str, optional
+        Name of the subdirectory containing the CG surface file.
+        Default is ``'CG_Mapped'``.
     size : str, optional
-        Size of the NGL viewer widget (CSS format), e.g. "900px".
+        Size of the NGL viewer widget (CSS format), e.g. ``"900px"``.
         The viewer is rendered as a square of this size.
 
     Returns
@@ -117,17 +120,17 @@ def render_connely_surface(SASA_folder='./SASA', size='900px'):
     """
 
     SASA_folder = Path(SASA_folder).resolve()
+    aa_surface  = str(SASA_folder / aa_subfolder / "surface.pdb")
+    cg_surface  = str(SASA_folder / cg_subfolder / "surface.pdb")
 
     view = nv.NGLWidget()
-    
-    view.add_component(f"{SASA_folder}/AA/surface.pdb")
-    view.add_component(f"{SASA_folder}/CG_Mapped/surface.pdb")
-    
-    # clear defaults
+
+    view.add_component(aa_surface)
+    view.add_component(cg_surface)
+
     view[0].clear_representations()
     view[1].clear_representations()
-    
-    # atomistic molecule
+
     view[0].add_representation("ball+stick", selection="NOT DOT")
     view[0].add_representation(
         "spacefill",
@@ -136,7 +139,7 @@ def render_connely_surface(SASA_folder='./SASA', size='900px'):
         opacity=0.35,
         color="blue"
     )
-    # CG molecule
+
     view[1].add_representation("spacefill", selection="NOT DOT", opacity=1.0, radius=.9)
     view[1].add_representation(
         "spacefill",
@@ -145,11 +148,11 @@ def render_connely_surface(SASA_folder='./SASA', size='900px'):
         opacity=0.45,
         color="red"
     )
-    view.center()
 
+    view.center()
     view._set_size(size, size)
     view.camera = "orthographic"
-    view.render_image(frame=True,trim=True,transparent=True,factor=6)
+    view.render_image(frame=True, trim=True, transparent=True, factor=6)
     return view
 
 
@@ -165,13 +168,13 @@ def render_ensemble(gro, xtc, sel="all", step=None, n_frames=None, size="400px")
         Trajectory file (e.g. XTC).
     sel : str, optional
         Atom selection used for alignment and centering.
-        Default is "all".
+        Default is ``"all"``.
     step : int, optional
-        Show every `step` frames.
+        Show every ``step`` frames.
     n_frames : int, optional
         Total number of frames to display, sampled evenly.
     size : str, optional
-        Viewer size (CSS units), default "400px".
+        Viewer size (CSS units), default ``"400px"``.
 
     Returns
     -------
@@ -182,9 +185,8 @@ def render_ensemble(gro, xtc, sel="all", step=None, n_frames=None, size="400px")
     gro = Path(gro).resolve()
     xtc = Path(xtc).resolve()
 
-    u = md.Universe(gro, xtc)
-    ref = md.Universe(gro, xtc)
-    ref.trajectory[0]
+    u   = md.Universe(str(gro), str(xtc))
+    ref = md.Universe(str(gro))
 
     align.AlignTraj(u, ref, select=sel, in_memory=True).run()
 
@@ -194,13 +196,13 @@ def render_ensemble(gro, xtc, sel="all", step=None, n_frames=None, size="400px")
         step = max(len(u.trajectory) // 20, 1)
 
     if n_frames is not None:
-        idx = np.linspace(0, len(u.trajectory) - 1, n_frames).astype(int)
+        frame_idx = np.linspace(0, len(u.trajectory) - 1, n_frames).astype(int)
     else:
-        idx = range(0, len(u.trajectory), step)
+        frame_idx = range(0, len(u.trajectory), step)
 
     view = nv.NGLWidget()
 
-    for i in idx:
+    for i in frame_idx:
         u.trajectory[i]
 
         coords = u.atoms.positions.copy()
@@ -218,23 +220,24 @@ def render_ensemble(gro, xtc, sel="all", step=None, n_frames=None, size="400px")
     view.camera = "orthographic"
 
     return view
-    
+
+
 def render_2dMapping(pdb_file, resname, mapping,
-                     out_svg="cg_overlay.svg", size=(950, 480), mode="connected",         
+                     out_svg="cg_overlay.svg", size=(950, 480), mode="connected",
                      bead_r=20.0, conn_r=12.0, alpha=0.3, line_w=2.0,
-                     font_size=14, label_dy=20.0,):
+                     font_size=14, label_dy=20.0):
     """
     Render a 2D atomistic structure with an overlaid coarse-grained (CG) mapping.
-    
+
     The atomistic molecule is read from a PDB file and depicted in 2D using RDKit.
-    CG beads defined in `bead_assignments` are then visualized on top of the
-    structure using one of several styles (centroid circles, atom blobs, or
+    CG beads defined in ``mapping`` are then visualized on top of the structure
+    using one of several styles (centroid circles, atom blobs, or
     connectivity-following shading).
-    
+
     Hydrogen atoms listed in bead assignments are automatically mapped onto their
     bonded heavy atoms so that bead centroids and connectivity are computed
     correctly.
-    
+
     Parameters
     ----------
     pdb_file : str
@@ -242,7 +245,7 @@ def render_2dMapping(pdb_file, resname, mapping,
     resname : str
         Residue name identifying the molecule in the PDB.
     mapping : dict
-        Mapping dictionary in SHAKER format. The expected structure is::
+        Mapping dictionary in SHAKER format::
 
             mapping = {
                 "RESNAME": {
@@ -252,131 +255,178 @@ def render_2dMapping(pdb_file, resname, mapping,
             }
     out_svg : str, optional
         Output SVG filename.
-    mode : {"circle","atomblobs","connected","both"}, optional
+    mode : {"circle", "atomblobs", "connected", "both"}, optional
         CG rendering style.
-    size, bead_r, conn_r, alpha, line_w, font_size, label_dy : optional
-        Visualization parameters controlling canvas size, bead radius,
-        transparency, outlines, and label placement.
-    
-    Writes
-    ------
-    SVG file with the atomistic structure and CG mapping overlay.
+    size : tuple of int, optional
+        Canvas size in pixels as ``(width, height)``.
+    bead_r : float, optional
+        Radius of the centroid circle in SVG units.
+    conn_r : float, optional
+        Half-width of the connectivity stroke / atom blob radius.
+    alpha : float, optional
+        Fill opacity for bead overlays.
+    line_w : float, optional
+        Stroke width for bead outlines.
+    font_size : int, optional
+        Font size for bead labels.
+    label_dy : float, optional
+        Vertical offset of labels relative to the bead centroid.
+
+    Returns
+    -------
+    str
+        The SVG source string. The same content is also written to ``out_svg``.
     """
 
     if mode not in {"circle", "atomblobs", "connected", "both"}:
         raise ValueError("mode must be one of: 'circle', 'atomblobs', 'connected', 'both'")
-        
+
     if resname not in mapping:
         raise ValueError(f"No mapping found for resname '{resname}'")
 
-    # Ensure exactly one residue of this type is present
-    u = md.Universe(pdb_file)
-    n_res = len(u.select_atoms(f"resname {resname}").residues)
-    if n_res != 1:
-        raise ValueError(
-            f"render_2dMapping expects exactly 1 residue with resname '{resname}' "
-            f"in {pdb_file}, found {n_res}")
-        
-    bead_names = list(mapping[resname].keys())
+    bead_names       = list(mapping[resname].keys())
     bead_assignments = [b["atoms"] for b in mapping[resname].values()]
 
     molH, mol = _load_mols(pdb_file)
     idxH = _atom_name_map(molH, resname)
-    idx = _atom_name_map(mol, resname)
-    hmap = _h_to_heavy_map(molH, resname)
+    idx  = _atom_name_map(mol,  resname)
+
+    res_ids = {
+        (atom.GetPDBResidueInfo().GetResidueNumber(),
+         atom.GetPDBResidueInfo().GetChainId())
+        for atom in molH.GetAtoms()
+        if atom.GetPDBResidueInfo() and _norm_resname(atom.GetPDBResidueInfo()) == resname
+    }
+    if len(res_ids) == 0:
+        present = sorted({
+            _norm_resname(atom.GetPDBResidueInfo())
+            for atom in molH.GetAtoms()
+            if atom.GetPDBResidueInfo()
+        })
+        raise ValueError(
+            f"No residue with resname '{resname}' found in {pdb_file}. "
+            f"Residue names present: {present}")
+    if len(res_ids) > 1:
+        raise ValueError(
+            f"render_2dMapping expects exactly 1 residue with resname '{resname}' "
+            f"in {pdb_file}, found {len(res_ids)}")
+
+    hmap   = _h_to_heavy_map(molH, resname)
     colors = _palette(len(bead_assignments))
 
-    ## Find if any atoms assigned in the mapping are missing in the pdb supplied.
     missing = sorted({a for bead in bead_assignments for a in bead} - set(idxH))
     if missing:
         preview = ", ".join(missing[:20])
         tail = " ..." if len(missing) > 20 else ""
         raise ValueError(f"Missing atom names in residue {resname}: {preview}{tail}")
 
-    # Base AA drawing
     w, h = size
     drawer = rdMolDraw2D.MolDraw2DSVG(w, h)
     opts = drawer.drawOptions()
-    opts.explicitMethyl = False
-    opts.addAtomIndices = False
+    opts.explicitMethyl    = False
+    opts.addAtomIndices    = False
     opts.addStereoAnnotation = False
 
     drawer.DrawMolecule(mol)
+
+    draw_coords = {
+        name: (drawer.GetDrawCoords(i).x, drawer.GetDrawCoords(i).y)
+        for name, i in idx.items()
+    }
+
     drawer.FinishDrawing()
     svg = drawer.GetDrawingText()
 
-    overlay = ['<g id="cg_overlay">']
+    shading_layer = []
+    label_layer   = []
 
     for bead, label, (r, g, b) in zip(bead_assignments, bead_names, colors):
-        weights = Counter(hmap.get(a, a) if a.startswith("H") else a for a in bead)
+        weights = Counter(hmap.get(a, a) for a in bead)
         weights = Counter({name: wt for name, wt in weights.items() if name in idx})
+
+        dropped = {hmap.get(a, a) for a in bead} & set(idxH) - set(idx)
+        if dropped:
+            warnings.warn(
+                f"Bead '{label}': atoms {sorted(dropped)} exist in the H-mol "
+                f"but are absent from the heavy-atom mol; centroid may be shifted.",
+                UserWarning, stacklevel=2)
 
         if not weights:
             continue
 
-        # Weighted centroid in draw coordinates
         sx = sy = sw = 0.0
         for name, wt in weights.items():
-            pt = drawer.GetDrawCoords(idx[name])
-            sx += wt * pt.x
-            sy += wt * pt.y
+            x, y = draw_coords[name]
+            sx += wt * x
+            sy += wt * y
             sw += wt
         cx, cy = sx / sw, sy / sw
 
-        heavy_names = _bead_heavy_names(bead, hmap)
-        atom_pts = {
-            name: (drawer.GetDrawCoords(idx[name]).x, drawer.GetDrawCoords(idx[name]).y)
-            for name in heavy_names
-            if name in idx }
-        edges = _bead_edges(mol, heavy_names, idx)
+        heavy_names = _bead_heavy_names(bead, hmap, mol, idx)
+        atom_pts    = {name: draw_coords[name] for name in heavy_names if name in draw_coords}
+        edges       = _bead_edges(mol, heavy_names, idx)
 
         fill = _rgba(r, g, b, alpha)
         edge = _rgb(r, g, b)
 
-        # Connectivity-following shading
         if mode in ("connected", "both"):
             if edges:
                 path = " ".join(
-                    f'M {atom_pts[a][0]:.2f},{atom_pts[a][1]:.2f} L {atom_pts[b2][0]:.2f},{atom_pts[b2][1]:.2f}'
-                    for a, b2 in edges )
-                overlay.append(
+                    f'M {atom_pts[a][0]:.2f},{atom_pts[a][1]:.2f} '
+                    f'L {atom_pts[b2][0]:.2f},{atom_pts[b2][1]:.2f}'
+                    for a, b2 in edges
+                )
+                shading_layer.append(
                     f'<path d="{path}" fill="none" stroke="{fill}" '
-                    f'stroke-width="{2*conn_r:.2f}" stroke-linecap="round" stroke-linejoin="round" />')
-            elif len(atom_pts) == 1:
-                x, y = next(iter(atom_pts.values()))
-                overlay.append(
-                    f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{conn_r:.2f}" '
+                    f'stroke-width="{2*conn_r:.2f}" stroke-linecap="round" '
+                    f'stroke-linejoin="round" />')
+            else:
+                shading_layer.append(
+                    f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{conn_r:.2f}" '
                     f'fill="{fill}" stroke="none" />')
 
-        # One circle per heavy atom
         if mode == "atomblobs":
             for x, y in atom_pts.values():
-                overlay.append(
+                shading_layer.append(
                     f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{conn_r:.2f}" '
                     f'fill="{fill}" stroke="{edge}" stroke-width="{line_w:.2f}" />')
 
-        # Centroid circle in the COG of the mapped bead.
         if mode in ("circle", "both"):
-            overlay.append(
+            shading_layer.append(
                 f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{bead_r:.2f}" '
                 f'fill="{fill}" stroke="{edge}" stroke-width="{line_w:.2f}" />')
 
-        tx = cx + max(bead_r, conn_r) + 2
+        label_offset = max(bead_r, conn_r) + 2
+        if cx + label_offset + len(label) * font_size * 0.6 > w:
+            tx     = cx - label_offset
+            anchor = "end"
+        else:
+            tx     = cx + label_offset
+            anchor = "start"
         ty = cy + label_dy
 
-        overlay.append(
+        label_layer.append(
             f'<text x="{tx:.2f}" y="{ty:.2f}" font-family="sans-serif" '
             f'font-size="{font_size}" font-weight="bold" dominant-baseline="middle" '
-            f'text-anchor="start" stroke="white" stroke-width="2" fill="white">{label}</text>')
-        overlay.append(
+            f'text-anchor="{anchor}" stroke="white" stroke-width="2" fill="white">'
+            f'{label}</text>')
+        label_layer.append(
             f'<text x="{tx:.2f}" y="{ty:.2f}" font-family="sans-serif" '
             f'font-size="{font_size}" font-weight="bold" dominant-baseline="middle" '
-            f'text-anchor="start" fill="{edge}">{label}</text>')
+            f'text-anchor="{anchor}" fill="{edge}">{label}</text>')
 
-    overlay.append("</g>")
-    svg = svg.replace("</svg>", "\n".join(overlay) + "\n</svg>")
+    overlay = ['<g id="cg_overlay">'] + shading_layer + label_layer + ['</g>']
+
+    parts = svg.rsplit("</svg>", 1)
+    svg   = parts[0] + "\n".join(overlay) + "\n</svg>" + parts[1]
+
     Path(out_svg).write_text(svg, encoding="utf-8")
+    return svg
 
+
+# ---------------------------------------------------------------------------
+# Private helpers
+# ---------------------------------------------------------------------------
 
 def _load_mols(pdb_file):
     """Return (molH, mol): sanitized molecule with Hs, and no-H molecule with 2D coords."""
@@ -385,7 +435,6 @@ def _load_mols(pdb_file):
         raise ValueError(f"Could not read PDB: {pdb_file}")
 
     rdDetermineBonds.DetermineBonds(molH)
-    rdDetermineBonds.DetermineBondOrders(molH)
     Chem.SanitizeMol(molH)
 
     mol = Chem.RemoveHs(molH)
@@ -393,12 +442,22 @@ def _load_mols(pdb_file):
     return molH, mol
 
 
+def _norm_resname(info):
+    """
+    Normalise a residue name from an RDKit PDBResidueInfo object.
+
+    RDKit stores residue names in a fixed-width field; ``strip()`` handles the
+    common trailing-space padding. Returns an empty string when ``info`` is None.
+    """
+    return info.GetResidueName().strip() if info else ""
+
+
 def _atom_name_map(mol, resname):
     """Map PDB atom name -> RDKit atom index for one residue name."""
     out = {}
     for atom in mol.GetAtoms():
         info = atom.GetPDBResidueInfo()
-        if info and info.GetResidueName().strip() == resname:
+        if info and _norm_resname(info) == resname:
             out[info.GetName().strip()] = atom.GetIdx()
     return out
 
@@ -408,14 +467,14 @@ def _h_to_heavy_map(molH, resname):
     out = {}
     for atom in molH.GetAtoms():
         info = atom.GetPDBResidueInfo()
-        if not info or info.GetResidueName().strip() != resname:
+        if not info or _norm_resname(info) != resname:
             continue
         if atom.GetAtomicNum() != 1 or not atom.GetNeighbors():
             continue
 
-        nb = atom.GetNeighbors()[0]
+        nb     = atom.GetNeighbors()[0]
         nbinfo = nb.GetPDBResidueInfo()
-        if nbinfo and nbinfo.GetResidueName().strip() == resname:
+        if nbinfo and _norm_resname(nbinfo) == resname:
             out[info.GetName().strip()] = nbinfo.GetName().strip()
     return out
 
@@ -434,14 +493,20 @@ def _palette(n):
     return [colors[i % len(colors)] for i in range(n)]
 
 
-def _bead_heavy_names(bead, hmap):
-    """Unique heavy atoms contributing to a bead, with Hs folded onto bonded heavy atoms."""
-    out = []
+def _bead_heavy_names(bead, hmap, mol, idx_map):
+    """
+    Unique heavy atoms contributing to a bead, with Hs folded onto their
+    bonded heavy atoms.
+    """
+    out  = []
     seen = set()
     for name in bead:
-        heavy = hmap.get(name, name) if name.startswith("H") else name
-        if heavy.startswith("H") or heavy in seen:
+        heavy = hmap.get(name, name)
+        if heavy in seen:
             continue
+        if heavy in idx_map:
+            if mol.GetAtomWithIdx(idx_map[heavy]).GetAtomicNum() == 1:
+                continue
         seen.add(heavy)
         out.append(heavy)
     return out
@@ -461,7 +526,7 @@ def _bead_edges(mol, names, idx_map):
             nb_name = info.GetName().strip()
             if nb_name in names:
                 edges.add(tuple(sorted((name, nb_name))))
-                
+
     return sorted(edges)
 
 
