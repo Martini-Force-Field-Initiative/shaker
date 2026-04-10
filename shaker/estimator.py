@@ -72,9 +72,10 @@ def bonded_estimator(universe, resname,
         If the estimated force constant exceeds this value, it is capped and the
         original value is written as a comment. Default is 250.
     res_bend_angle : float, optional
-        Maximum allowed bending angle in degrees. 
-        If the estimated angle exceeds this value, a resticted bending potential is used 
-        (angle type 10 in GROMACS). Default is 250.
+        Angle threshold in degrees above which a restricted bending potential
+        (type 10) is used, but only if the angle (i,j,k) is a sub-sequence of
+        a proper or improper dihedral target (matching i-j-k or j-k-l).
+        Default is 140.
     start : int, optional
         First frame to analyze. Default is 0.
     stop : int or None, optional
@@ -170,9 +171,10 @@ def _estimate_bonded_from_dict(AA_bonded,
         If the estimated force constant exceeds this value, it is capped and the
         original value is written as a comment. Default is 250.
     res_bend_angle : float, optional
-        Maximum allowed bending angle in degrees. 
-        If the estimated angle exceeds this value, a resticted bending potential is used 
-        (angle type 10 in GROMACS). Default is 250.
+        Angle threshold in degrees above which a restricted bending potential
+        (type 10) is used, but only if the angle (i,j,k) is a sub-sequence of
+        a proper or improper dihedral target (matching i-j-k or j-k-l).
+        Default is 140.
     bead_index : dict, optional
         Mapping from bead name to bead index. Required only if `use_indices=True`.
     use_indices : bool, optional
@@ -232,6 +234,20 @@ def _estimate_bonded_from_dict(AA_bonded,
     def _header(key):
         return _SECTION_HEADERS[key][0 if use_indices else 1]
 
+    all_dihed_tgts = harm_dihed_tgts + imp_dihed_tgts
+
+    def _angle_in_dihedral(angle_tgt):
+        """Return True if angle (i,j,k) appears as a central triplet in any
+        dihedral, in either orientation. Checks both i-j-k and k-j-i against
+        the first three and last three beads of each dihedral (and its reverse)."""
+        a, b, c = angle_tgt
+        angle = [a, b, c]
+        for d in all_dihed_tgts:
+            for seq in (d, d[::-1]):
+                if angle == seq[:3] or angle == seq[1:]:
+                    return True
+        return False
+
     bond_lines = []
     constraint_lines = []
     angle_lines = []
@@ -259,13 +275,29 @@ def _estimate_bonded_from_dict(AA_bonded,
         theta0, ktheta = _estimate_angle_params_from_hist(bins, hist, T=T, units=ang_units)
         ijk, comment = _fmt_angle(tgt[0], tgt[1], tgt[2])
 
+        use_res_bend = theta0 > res_bend_angle and _angle_in_dihedral(tgt)
+        angle_type = "10" if use_res_bend else " 1"
+
+        # defaults for non-res-bend angles
         k_write = min(ktheta, angle_cap)
         cap_comment = f"capped from k={ktheta:.1f}" if ktheta > angle_cap else None
-        res_bend_comment = f"angle type set to 10 since θ>{res_bend_angle:.1f}" if theta0 > res_bend_angle else None
-        angle_type = "10" if theta0 > res_bend_angle else " 1"
+        res_bend_comment = None
+        near_180_comment = None
+
+        if use_res_bend:
+            k_write = min(ktheta * 1.1, angle_cap)
+            cap_comment = f"capped from k={ktheta:.1f}" if ktheta * 1.1 > angle_cap else None
+            res_bend_comment = f"angle type set to 10 since θ>{res_bend_angle:.1f} and part of a dihedral, k increased by 10%"
+            if theta0 > 150.0:
+                k_write = min(ktheta * 1.1 * 1.2, angle_cap)
+                cap_comment = f"capped from k={ktheta:.1f}" if ktheta * 1.1 * 1.2 > angle_cap else None
+                res_bend_comment = f"angle type set to 10 since θ>{res_bend_angle:.1f} and part of a dihedral, k increased by 10%+20%"
+                near_180_comment = f"WARNING: ref angle capped from {theta0:.2f} to 150.00 — angle too close to 180, consider picking a different dihedral"
+                theta0 = 150.0
+
         line = _build_comment(
             f"{ijk}   {angle_type}   {theta0:8.2f}   {k_write:10.1f}",
-            cap_comment, res_bend_comment, comment)
+            cap_comment, res_bend_comment, near_180_comment, comment)
         angle_lines.append(line)
 
     for tgt in harm_dihed_tgts:
