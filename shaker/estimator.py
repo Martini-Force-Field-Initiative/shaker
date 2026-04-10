@@ -123,7 +123,7 @@ def _estimate_bonded_from_dict(AA_bonded,
                                harm_dihed_tgts=None, imp_dihed_tgts=None, plot_dihed=False,
                                T=300, dist_units="A", ang_units="deg",
                                constraint_threshold=25000,
-                               angle_cap=250.0, improper_cap=250.0,
+                               angle_cap=250.0, improper_cap=250.0, res_bend_angle=140.0,
                                bead_index=None, use_indices=False):
     """
     Estimate initial bonded parameters from measured distributions and return
@@ -165,6 +165,10 @@ def _estimate_bonded_from_dict(AA_bonded,
         Maximum allowed force constant for improper dihedrals in kJ mol⁻¹ rad⁻².
         If the estimated force constant exceeds this value, it is capped and the
         original value is written as a comment. Default is 250.
+    res_bend_angle : float, optional
+        Maximum allowed bending angle in degrees. 
+        If the estimated angle exceeds this value, a resticted bending potential is used 
+        (angle type 10 in GROMACS). Default is 250.
     bead_index : dict, optional
         Mapping from bead name to bead index. Required only if `use_indices=True`.
     use_indices : bool, optional
@@ -253,9 +257,11 @@ def _estimate_bonded_from_dict(AA_bonded,
 
         k_write = min(ktheta, angle_cap)
         cap_comment = f"capped from k={ktheta:.1f}" if ktheta > angle_cap else None
+        res_bend_comment = f"angle type set to 10 since θ>{res_bend_angle:.1f}" if theta0 > res_bend_angle else None
+        angle_type = "10" if theta0 > res_bend_angle else " 1"
         line = _build_comment(
-            f"{ijk}   1   {theta0:8.2f}   {k_write:10.1f}",
-            cap_comment, comment)
+            f"{ijk}   {angle_type}   {theta0:8.2f}   {k_write:10.1f}",
+            cap_comment, res_bend_comment, comment)
         angle_lines.append(line)
 
     for tgt in harm_dihed_tgts:
