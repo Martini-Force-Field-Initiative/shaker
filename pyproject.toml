@@ -8,9 +8,17 @@ version = "0.1.0"
 description = "A Toolkit for the parameterization of physics-based force fields."
 readme = "README.md"
 requires-python = ">=3.9"
-authors = [{ name = "Luís Borges Araújo", email = "you@example.com" }]
+authors = [
+  { name = "Luís Borges Araújo", email = "luis.borges@ens-lyon.fr"},
+  { name = "Pablo Cardona Perez", email = "pablo.cardona_perez@ens-lyon.fr" }
+]
 dependencies = [
-  # should probably add the dependencies here hahah
+"numpy",
+"scipy",
+"matplotlib",
+"rdkit",
+"nglview",
+"tqdm"
 ]
 
 [tool.setuptools]
