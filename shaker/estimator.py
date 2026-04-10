@@ -71,6 +71,10 @@ def bonded_estimator(universe, resname,
         Maximum allowed force constant for improper dihedrals in kJ mol⁻¹ rad⁻².
         If the estimated force constant exceeds this value, it is capped and the
         original value is written as a comment. Default is 250.
+    res_bend_angle : float, optional
+        Maximum allowed bending angle in degrees. 
+        If the estimated angle exceeds this value, a resticted bending potential is used 
+        (angle type 10 in GROMACS). Default is 250.
     start : int, optional
         First frame to analyze. Default is 0.
     stop : int or None, optional
