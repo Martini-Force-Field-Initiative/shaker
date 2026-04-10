@@ -28,7 +28,7 @@ def bonded_estimator(universe, resname,
                      harm_dihed_tgts=None, imp_dihed_tgts=None, plot_dihed=False,
                      T=300,
                      constraint_threshold=25000,
-                     angle_cap=250.0, improper_cap=250.0,
+                     angle_cap=250.0, improper_cap=250.0, res_bend_angle=140.0,
                      start=0, stop=None, stride=1,
                      use_indices=False):
     """
@@ -113,7 +113,7 @@ def bonded_estimator(universe, resname,
         plot_dihed=plot_dihed,
         T=T,
         constraint_threshold=constraint_threshold,
-        angle_cap=angle_cap, improper_cap=improper_cap,
+        angle_cap=angle_cap, improper_cap=improper_cap, res_bend_angle=res_bend_angle,
         bead_index=bead_index,
         use_indices=use_indices)
 
