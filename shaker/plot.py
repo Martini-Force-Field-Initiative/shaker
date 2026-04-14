@@ -12,7 +12,10 @@ from scipy.stats import wasserstein_distance
 mpl.rcParams['figure.dpi'] = 150
 
 # NumPy 2.0 renamed trapz -> trapezoid
-_trapz = getattr(np, "trapezoid", np.trapz)
+try:
+    _trapz = np.trapezoid
+except AttributeError:
+    _trapz = np.trapz
 
 '''
 Collection of functions to assist in matplotlib plotting.
@@ -147,12 +150,13 @@ def plot_bonded_distributions(*bonded_dicts,
     Parameters
     ----------
     *bonded_dicts : dict
-        Any number of bonded dictionaries with structure like:
-        {
-            "distances": {"targets": ..., "bins": ..., "hist": ...},
-            "angles":    {"targets": ..., "bins": ..., "hist": ...},
-            "dihedrals": {"targets": ..., "bins": ..., "hist": ...},
-        }
+        Any number of bonded dictionaries with structure like::
+
+            {
+                "distances": {"targets": ..., "bins": ..., "hist": ...},
+                "angles":    {"targets": ..., "bins": ..., "hist": ...},
+                "dihedrals": {"targets": ..., "bins": ..., "hist": ...},
+            }
 
     labels : list[str] | None, optional
         Labels for each bonded dictionary. If None, uses Dataset 1, Dataset 2, ...

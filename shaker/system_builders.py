@@ -54,10 +54,6 @@ def prepare_setup_water(initial_structure, structure_itp='initial_CG.itp',
     5. Add additional NaCl to reach the target concentration.
     
     All GROMACS stdout/stderr are appended to `gmx_setup_water.log`.
-
-    Wishlist
-    --------
-    - Support for multiple solvent models.
     '''
     
     ## normalize paths

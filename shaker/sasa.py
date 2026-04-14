@@ -25,6 +25,7 @@ def run_SASA(name,
     a custom van der Waals radii file is generated from the supplied bead
     names and bead types.
     
+    Parameters
     ----------
     name : str
             Name/handle for this analysis. Used to create the output directory
