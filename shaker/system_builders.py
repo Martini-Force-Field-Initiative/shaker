@@ -1,6 +1,7 @@
 """GROMACS simulation setup and execution."""
 
 import MDAnalysis as md
+import warnings
 import subprocess
 from importlib.resources import files
 import numpy as np
@@ -73,7 +74,9 @@ def prepare_setup_water(initial_structure, structure_itp='initial_CG.itp',
 
     ## Prepare top file
     if not resname:
-        resname = np.unique(md.Universe(initial_structure).residues.resnames)[0]
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=r"Empty box", category=UserWarning)
+            resname = np.unique(md.Universe(initial_structure).residues.resnames)[0]
     
     topinput = open('topol.top', 'w')
     topinput.write(f'#include "{FFitp}"\n')
@@ -122,7 +125,10 @@ def prepare_setup_water(initial_structure, structure_itp='initial_CG.itp',
              log=log, env=env, input_text="W\n")
 
         ## Add NaCl
-        Waternumber = len(md.Universe('memion.gro').select_atoms('resname W').residues)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=r"Empty box", category=UserWarning)
+            u_mem = md.Universe('memion.gro')
+        Waternumber = len(u_mem.select_atoms('resname W').residues)
         naclNUM = int((NaCL_Conc * Waternumber * 4) / 55.5)
 
         _run([gmx, "grompp",

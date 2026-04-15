@@ -2,6 +2,9 @@
 
 import numpy as np
 from tqdm.autonotebook import tqdm 
+import warnings
+warnings.filterwarnings("ignore", message=r"Reload offsets from trajectory", category=UserWarning, module=r"MDAnalysis.*")
+warnings.filterwarnings("ignore", message=r"Element information is missing", category=UserWarning, module=r"MDAnalysis.*")
 
 def measure_bonded_terms (u, resname,
                           dist_tgts, ang_tgts, dihed_tgts, 
