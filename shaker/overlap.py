@@ -1,3 +1,5 @@
+"""Bead overlap matrix analysis."""
+
 import numpy as np
 from tqdm.autonotebook import tqdm
 from MDAnalysis.analysis.distances import self_distance_array

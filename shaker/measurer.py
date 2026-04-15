@@ -1,3 +1,5 @@
+"""Measure bonded distributions (distances, angles, dihedrals) from trajectories."""
+
 import numpy as np
 from tqdm.autonotebook import tqdm 
 

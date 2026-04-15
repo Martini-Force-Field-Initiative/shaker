@@ -1,3 +1,5 @@
+"""Map AA/QM trajectories to CG representations."""
+
 import MDAnalysis as md
 import warnings
 from pathlib import Path
@@ -5,10 +7,6 @@ import numpy as np
 from tqdm.autonotebook import tqdm
 
 from .helper import _BEAD_RATIOS, _size_from_name, _size_label
-
-'''
-Functions and tools to process and map AA/QM trajectories to CG.
-'''
 
 def _write_mapping_report(u, mapping, outdir, outname, verbose=True):
     '''

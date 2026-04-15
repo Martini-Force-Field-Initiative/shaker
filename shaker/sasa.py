@@ -1,14 +1,11 @@
+"""SASA calculation with CG-specific van der Waals radii."""
+
 import MDAnalysis as md
 from importlib.resources import files
 import os 
 import subprocess
 from .helper import _bead_sizes_dict, _size_from_name
 from pathlib import Path
-
-'''
-Functions, tools and workflows to calculate SASA & Connely surfaces.
-Mostly wrappers for GROMACS' `gmx sasa` tool.
-'''
 
 
 def run_SASA(name, 

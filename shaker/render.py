@@ -1,3 +1,5 @@
+"""3D visualization and 2D chemical structure drawing."""
+
 from collections import Counter
 from pathlib import Path
 import warnings
@@ -11,10 +13,6 @@ from MDAnalysis.analysis import align
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdDetermineBonds
 from rdkit.Chem.Draw import rdMolDraw2D
-
-'''
-Collection of functions to assist in nglview rendering.
-'''
 
 def render_mapping(cg_mapped_gro, cg_mapped_xtc, 
                    aa_gro, aa_xtc,

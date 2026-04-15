@@ -1,3 +1,5 @@
+"""Virtual site generation and molecule alignment."""
+
 import numpy as np
 import MDAnalysis as md
 from MDAnalysis.analysis import align

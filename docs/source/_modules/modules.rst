@@ -1,7 +1,8 @@
-API Reference
-=============
+Modules
+=======
 
-This is the landing page of the API Reference. 
+A brief description of each module are listed below.
+For a description of the module's functions click on the module's name.
 
 .. currentmodule:: shaker
 .. autosummary::
@@ -10,7 +11,6 @@ This is the landing page of the API Reference.
 
    dihedral_fitting
    estimator
-   helper
    itp
    mapper
    measurer

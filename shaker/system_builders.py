@@ -1,3 +1,5 @@
+"""GROMACS simulation setup and execution."""
+
 import MDAnalysis as md
 import subprocess
 from importlib.resources import files

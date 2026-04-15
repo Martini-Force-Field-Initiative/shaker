@@ -59,18 +59,15 @@ myst_heading_anchors = 4
 
 html_theme = 'pydata_sphinx_theme' 
 html_static_path = ['_static']
-
+html_show_sourcelink = False
 # -- Theme configuration -----------------------------------------------------
 
 
 # Sidebar configuration
 
 html_sidebars = {
-
     "**": ["search-field.html", "sidebar-nav-bs.html"],
-
     'index': []
-
     }
 
 

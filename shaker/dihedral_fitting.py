@@ -1,12 +1,10 @@
+"""Inverted Boltzmann dihedral fitting with cosine series."""
+
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import combinations
 import warnings
 from math import factorial
-
-'''
-Functions for dihedral fitting routines.
-'''
 
 ###
 ### Helpers

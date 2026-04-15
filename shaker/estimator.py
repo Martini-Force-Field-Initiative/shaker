@@ -1,3 +1,5 @@
+"""Estimate GROMACS bonded parameters from distributions."""
+
 import numpy as np
 from .measurer import measure_bonded_terms
 from .dihedral_fitting import fit_dihedral_workflow

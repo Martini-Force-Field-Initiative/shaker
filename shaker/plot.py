@@ -1,3 +1,5 @@
+"""Publication-quality distribution and SASA plots."""
+
 import math
 from pathlib import Path
 import numpy as np
@@ -16,10 +18,6 @@ try:
     _trapz = np.trapezoid
 except AttributeError:
     _trapz = np.trapz
-
-'''
-Collection of functions to assist in matplotlib plotting.
-'''
 
 def plot_sasa_dir(root="./SASA",
                   xvg="resarea_SASA.xvg"):

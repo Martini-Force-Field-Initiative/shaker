@@ -9,6 +9,3 @@ the other developers. In this example case, we will link to two other files:
 .. toctree::
    :maxdepth: 2
    :caption: Getting started
-
-   quickstart1
-   quickstart2
