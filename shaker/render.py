@@ -50,8 +50,20 @@ def render_mapping(cg_mapped_gro, cg_mapped_xtc,
     aa_gro = Path(aa_gro).resolve()
     aa_xtc = Path(aa_xtc).resolve()
 
-    u_aa = md.Universe(str(aa_gro), str(aa_xtc))
-    u_cg = md.Universe(str(cg_mapped_gro), str(cg_mapped_xtc))
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Element information is missing, elements attribute will not be populated.*",
+            category=UserWarning,
+            module=r"MDAnalysis\.topology\.PDBParser",
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Reload offsets from trajectory",
+            category=UserWarning,
+        )
+        u_aa = md.Universe(str(aa_gro), str(aa_xtc))
+        u_cg = md.Universe(str(cg_mapped_gro), str(cg_mapped_xtc))
 
     view = nv.NGLWidget()
     view.add_trajectory(u_aa)
@@ -150,7 +162,7 @@ def render_connely_surface(SASA_folder='./SASA', aa_subfolder='AA',
     view.center()
     view._set_size(size, size)
     view.camera = "orthographic"
-    view.render_image(frame=True, trim=True, transparent=True, factor=6)
+    view.render_image(trim=True, transparent=True, factor=6)
     return view
 
 

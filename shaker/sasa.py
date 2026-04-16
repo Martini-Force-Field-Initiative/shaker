@@ -1,6 +1,7 @@
 """SASA calculation with CG-specific van der Waals radii."""
 
 import MDAnalysis as md
+import warnings
 from importlib.resources import files
 import os 
 import subprocess
@@ -60,11 +61,16 @@ def run_SASA(name,
     dir_writing = f'{dir_out}/SASA/{name}'
     os.makedirs(dir_writing, exist_ok=True)
 
-    ## Create index file and spit out a gro.
-    u = md.Universe(gro, xtc)
-    tgt = u.select_atoms(f'resname {resname}').residues[0].atoms.select_atoms(selection)
-    tgt.write(f"{dir_writing}/index.ndx", mode="w", name= 'TGT')
-    tgt.atoms.write(f"{dir_writing}/gro.gro")
+    ## Create index file and run SASA, suppress expected MDAnalysis warnings during the operation.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r"Element information is missing", category=UserWarning)
+        warnings.filterwarnings("ignore", message=r"missing dimension", category=UserWarning)
+
+        ## Create index file and spit out a gro.
+        u = md.Universe(gro, xtc)
+        tgt = u.select_atoms(f'resname {resname}').residues[0].atoms.select_atoms(selection)
+        tgt.write(f"{dir_writing}/index.ndx", mode="w", name='TGT')
+        tgt.atoms.write(f"{dir_writing}/gro.gro")
 
     ## Prepare vdw radii file.
     if isCG:
@@ -79,8 +85,7 @@ def run_SASA(name,
         _write_cg_vdw(dir_writing, bead_names, bead_sizes)
     else: # Most likely AA.
         vdwloc = files("shaker.data.vdw") / "vdwradii_AA.dat"
-        subprocess.call(f'cp {vdwloc} {dir_writing}/vdwradii.dat'
-                    , shell=True)
+        subprocess.call(f'cp {vdwloc} {dir_writing}/vdwradii.dat', shell=True)
 
     ## Calculate SASA & connoly surface
     env = os.environ.copy()

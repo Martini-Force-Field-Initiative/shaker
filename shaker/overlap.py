@@ -139,8 +139,8 @@ def _plot_overlap_matrix(overlap_results,
     row_means      = np.nanmean(matrix_no_diag, axis=1)
     cmap           = _make_overlap_cmap()
 
-    fig = plt.figure(figsize=(n * 1.2 + 3.5, n * 1.2 + 1))
-    gs  = gridspec.GridSpec(1, 4, width_ratios=[n, 1, 0.15, 0.5], wspace=0.02)
+    fig = plt.figure(constrained_layout=True, figsize=(n * 1.2 + 3.5, n * 1.2 + 1))
+    gs  = gridspec.GridSpec(1, 4, figure=fig, width_ratios=[n, 1, 0.15, 0.5], wspace=0.02)
     ax_matrix = fig.add_subplot(gs[0])
     ax_mean   = fig.add_subplot(gs[1])
     ax_cbar   = fig.add_subplot(gs[3])
@@ -190,7 +190,6 @@ def _plot_overlap_matrix(overlap_results,
     cbar.update_ticks()
     cbar.outline.set_visible(False)
 
-    fig.tight_layout()
     return fig, (ax_matrix, ax_mean, ax_cbar)
 
 
@@ -300,6 +299,6 @@ def assess_overlap_matrix(u_aa, u_cg, resname,
                                      cell_fontsize=cell_fontsize)
 
     if outname:
-        fig.savefig(f'{outname}_overlap_matrix.png', dpi=150, bbox_inches='tight')
+        fig.savefig(f'{outname}_overlap_matrix.png', dpi=150)
 
     return oc, fig, axes
