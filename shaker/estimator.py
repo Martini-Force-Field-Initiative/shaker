@@ -1,4 +1,7 @@
+"""Estimate GROMACS bonded parameters from distributions."""
+
 import numpy as np
+import warnings
 from .measurer import measure_bonded_terms
 from .dihedral_fitting import fit_dihedral_workflow
 
@@ -106,9 +109,11 @@ def bonded_estimator(universe, resname,
             raise ValueError(f"No residues found with resname '{resname}'")
         bead_index = {atom.name: i + 1 for i, atom in enumerate(residues[0].atoms)}
 
-    bonded_dist = measure_bonded_terms(universe, resname,
-                                       dist_tgts, ang_tgts, harm_dihed_tgts + imp_dihed_tgts,
-                                       start=start, stop=stop, stride=stride)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r"Reload offsets from trajectory", category=UserWarning)
+        bonded_dist = measure_bonded_terms(universe, resname,
+                                           dist_tgts, ang_tgts, harm_dihed_tgts + imp_dihed_tgts,
+                                           start=start, stop=stop, stride=stride)
 
     return _estimate_bonded_from_dict(
         bonded_dist,

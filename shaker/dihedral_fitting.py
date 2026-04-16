@@ -1,12 +1,10 @@
+"""Inverted Boltzmann dihedral fitting with cosine series."""
+
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import combinations
 import warnings
 from math import factorial
-
-'''
-Functions for dihedral fitting routines.
-'''
 
 ###
 ### Helpers
@@ -133,25 +131,32 @@ def inverted_boltzmann(data_density, kcal=False, temp=298,
 
 def savitzky_golay(y, window_size, order, deriv=0, rate=1):
     r"""Smooth (and optionally differentiate) data with a Savitzky-Golay filter.
+
     The Savitzky-Golay filter removes high frequency noise from data.
     It has the advantage of preserving the original shape and
     features of the signal better than other types of filtering
     approaches, such as moving averages techniques.
+
     Parameters
     ----------
     y : array_like, shape (N,)
         the values of the time history of the signal.
+
     window_size : int
         the length of the window. Must be an odd integer number.
+
     order : int
         the order of the polynomial used in the filtering.
         Must be less then `window_size` - 1.
+
     deriv: int
         the order of the derivative to compute (default = 0 means only smoothing)
+
     Returns
     -------
     ys : ndarray, shape (N)
         the smoothed signal (or it's n-th derivative).
+
     Notes
     -----
     The Savitzky-Golay is a type of low-pass filter, particularly
@@ -159,17 +164,22 @@ def savitzky_golay(y, window_size, order, deriv=0, rate=1):
     approach is to make for each point a least-square fit with a
     polynomial of high order over a odd-sized window centered at
     the point.
+
     Examples
     --------
-    t = np.linspace(-4, 4, 500)
-    y = np.exp( -t**2 ) + np.random.normal(0, 0.05, t.shape)
-    ysg = savitzky_golay(y, window_size=31, order=4)
-    import matplotlib.pyplot as plt
-    plt.plot(t, y, label='Noisy signal')
-    plt.plot(t, np.exp(-t**2), 'k', lw=1.5, label='Original signal')
-    plt.plot(t, ysg, 'r', label='Filtered signal')
-    plt.legend()
-    plt.show()
+
+    .. code-block:: python
+
+        t = np.linspace(-4, 4, 500)
+        y = np.exp( -t**2 ) + np.random.normal(0, 0.05, t.shape)
+        ysg = savitzky_golay(y, window_size=31, order=4)
+        import matplotlib.pyplot as plt
+        plt.plot(t, y, label='Noisy signal')
+        plt.plot(t, np.exp(-t**2), 'k', lw=1.5, label='Original signal')
+        plt.plot(t, ysg, 'r', label='Filtered signal')
+        plt.legend()
+        plt.show()
+
     References
     ----------
     .. [1] A. Savitzky, M. J. E. Golay, Smoothing and Differentiation of
@@ -302,7 +312,11 @@ def fit_periodic_harmonics(
     Fit a dihedral potential energy surface to a sum of periodic harmonics.
 
     Each term takes the GROMACS 1+cos form:
+
+    .. math::
+
         V(θ) = Σ kₙ · (1 + cos(nθ - δₙ))
+
     where n is the multiplicity, kₙ the barrier height, and δₙ the phase.
 
     The fitter performs an exhaustive search over all combinations of
@@ -350,23 +364,33 @@ def fit_periodic_harmonics(
 
     Returns
     -------
-    dict with keys:
+    dict
+        Dictionary with the following keys:
+
         mults : tuple of int
             Multiplicities of the selected harmonic terms.
+
         amps : np.ndarray
             Barrier heights kₙ in kJ/mol for each term.
+
         phases_deg : np.ndarray
             Phase angles δₙ in degrees for each term.
+
         offset_1pluscos : float
             Constant offset so that min V(θ) = 0.
+
         beta : np.ndarray
             Raw least-squares coefficients in cos/sin form.
+
         rss_w : float
             Weighted residual sum of squares of the best model.
+
         score : float
             AIC or BIC score of the best model.
+
         criterion : str
             Which criterion was used.
+
         weights_summary : dict
             Records the weighting parameters used.
     """
@@ -460,10 +484,12 @@ def evaluate_model(bins, model):
 def report_potentials(best, bins=None, energy_kj=None, weights=None,
                       phase_range="-180_180", sort_by="multiplicity", decimals=3, return_pots=False):
     """
-    Format each fitted term as: refdegree, k, multiplicity
-      - refdegree: δ (degrees) in 1+cos(nθ - δ)
-      - k: amplitude in kJ/mol
-      - multiplicity: integer n
+    Format each fitted term as: refdegree, k, multiplicity.
+
+    - refdegree: δ (degrees) in 1+cos(nθ - δ)
+    - k: amplitude in kJ/mol
+    - multiplicity: integer n
+
     Prints to stdout, or returns as a list of strings if return_pots=True.
     If bins and energy_kj are provided, appends RMSE to the first line.
     If `weights` is provided, computes weighted RMSE instead.

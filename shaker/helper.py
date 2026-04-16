@@ -1,3 +1,4 @@
+"""Utility helper functions used across SHAKER modules."""
 
 _bead_sizes_dict = {'R':0.264,
                    'S':0.230,

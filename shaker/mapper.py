@@ -1,3 +1,5 @@
+"""Map AA/QM trajectories to CG representations."""
+
 import MDAnalysis as md
 import warnings
 from pathlib import Path
@@ -5,10 +7,6 @@ import numpy as np
 from tqdm.autonotebook import tqdm
 
 from .helper import _BEAD_RATIOS, _size_from_name, _size_label
-
-'''
-Functions and tools to process and map AA/QM trajectories to CG.
-'''
 
 def _write_mapping_report(u, mapping, outdir, outname, verbose=True):
     '''
@@ -203,7 +201,14 @@ def map_aa2cg(gro, xtc, mapping,
     outdir = Path(outdir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
-    u = md.Universe(gro, xtc)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"Element information is missing, elements attribute will not be populated.*",
+            category=UserWarning,
+            module=r"MDAnalysis\.topology\.PDBParser",
+        )
+        u = md.Universe(gro, xtc)
 
     # Build bead AtomGroups in the exact order we want
     bead_agg      = []
@@ -258,7 +263,13 @@ def map_aa2cg(gro, xtc, mapping,
             cg.atoms.positions = coords
             W.write(cg.atoms)
             if not wrote_gro:
-                cg.atoms.write(out_gro.as_posix())
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message=r"missing dimension - setting unit cell to zeroed box.*",
+                        category=UserWarning,
+                    )
+                    cg.atoms.write(out_gro.as_posix())
                 wrote_gro = True
 
     if report:

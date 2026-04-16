@@ -1,3 +1,5 @@
+"""GROMACS topology (.itp) file generation."""
+
 from pathlib import Path
 
 def write_initial_CGitp (resname, mapping, 

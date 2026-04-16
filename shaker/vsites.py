@@ -1,3 +1,5 @@
+"""Virtual site generation and molecule alignment."""
+
 import numpy as np
 import MDAnalysis as md
 from MDAnalysis.analysis import align
@@ -158,11 +160,13 @@ def generate_virtual_sites3(universe, frame_names,
     Returns
     -------
     dict
-        Dictionary containing:
-        - ``"topology_lines"`` : list of str
+        Dictionary containing the following keys:
+
+        topology_lines : list of str
             Lines for the generated [constraints], [virtual_sites3], and
             [exclusions] topology sections.
-        - ``"mapping"`` : dict or None
+
+        mapping : dict or None
             Updated mapping dictionary containing bead masses if
             ``mass_split`` was applied, otherwise ``None``.
     
@@ -173,9 +177,11 @@ def generate_virtual_sites3(universe, frame_names,
     
     Each site position is expressed in the local frame defined by the
     three constructing atoms as
-    
-        r = a * v1 + b * v2 + c * (v1 × v2)
-    
+
+    .. math::
+
+        r = a * v1 + b * v2 + c * (v1 \\times v2)
+
     where
     
         v1 = r(frame[1]) − r(frame[0])
