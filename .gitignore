@@ -13,7 +13,9 @@ build/
 # Sphinx documentation
 docs/build/
 docs/source/_apireference/_generated/
+docs/source/_modules/_generated/
 .doctrees/
+
 
 # Ignore everything (output) in the 1_BasicParameterization and AA-reference directories 
 tutorials/1_BasicParameterization/*
