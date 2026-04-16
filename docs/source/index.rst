@@ -81,7 +81,6 @@ Clone the repository
 
 .. code-block:: bash
 
-   # From source
    git clone https://github.com/Lp0lp/shaker.git
 
 Create a virtual environment with the dependencies (e.g. with **conda**):

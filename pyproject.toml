@@ -34,3 +34,10 @@ include = ["shaker*"]
 
 [tool.setuptools.package-data]
 shaker = ["data/**/*"]
+
+# Setuptools deprecated pkg_resources and show a warning about it.
+# nglview uses it so we ignore and pin setuptools,81 to make sure it works.
+[tool.pytest.ini_options]
+filterwarnings = [
+  "ignore:pkg_resources is deprecated as an API:UserWarning:nglview",
+]
