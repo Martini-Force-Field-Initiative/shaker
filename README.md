@@ -22,22 +22,46 @@ It provides modular utilities for mapping atomistic trajectories to CG represent
 
 ## Installation
 
-Clone the repository and create a conda environment with the dependencies
+### Step1:
+
+Clone the repository
 ```bash
 git clone https://github.com/Lp0lp/shaker.git
+
+```
+Create a virtual environment with the dependencies (e.g. with **conda**):
+```bash
 cd shaker
 conda env create -f environment-user.yml
 ```
-Test the package with pytest
+This will create a conda environment with the name shaker-env.
+
+***OR*** with **venv**:
 ```bash
-pytest -v tests/
+cd shaker
+python3 -m venv shaker-venv
 ```
-Install SHAKER using pip
+This will create a venv environment with the name shaker-env.
+
+Then activate your respective environment.
+
+### Step2:
+
+Install SHAKER with pip:
 ```bash
 pip install .
 ```
 
-### Requirements
+### Step3:
+
+Test the package with pytest
+```bash
+pytest -v tests/
+```
+
+All the tests should pass, if not please open an issue.
+
+## Requirements
 
 - Python >= 3.10
 - [MDAnalysis](https://www.mdanalysis.org/)
@@ -51,11 +75,11 @@ pip install .
 
 ---
 
-## Typical Workflow
+# Typical Workflow
 
 SHAKER is designed for iterative CG parameterization. A typical session in a Jupyter notebook follows these steps:
 
-### 1. Map an atomistic trajectory to CG
+## 1. Map an atomistic trajectory to CG
 
 ```python
 import shaker
@@ -74,7 +98,7 @@ shaker.map_aa2cg("reference.gro", "reference.xtc", mapping, outname="cg_mapped")
 This writes `cg_mapped.gro` and `cg_mapped.xtc`, and prints a mapping quality report
 comparing your bead count against the Martini 3 ±1/10 heavy-atom tolerance.
 
-### 2. Estimate bonded parameters
+## 2. Estimate bonded parameters
 
 ```python
 import MDAnalysis as mda
@@ -93,13 +117,13 @@ print(topology_text)
 `bonded_estimator` measures distributions, applies the equipartition theorem for bonds and angles, fits dihedrals via inverted Boltzmann, and returns
 GROMACS-formatted topology lines ready to paste into an `.itp` file.
 
-### 3. Write an initial topology file
+## 3. Write an initial topology file
 
 ```python
 shaker.write_initial_CGitp("cg_mapped.gro", mapping, outname="initial_CG.itp")
 ```
 
-### 4. Set up and run a simulation
+## 4. Set up and run a simulation
 
 ```python
 shaker.prepare_setup_water(
@@ -113,7 +137,7 @@ shaker.prepare_setup_water(
 shaker.runSim()
 ```
 
-### 5. Compare distributions
+## 5. Compare distributions
 
 ```python
 u_aa = mda.Universe("cg_mapped.gro", "cg_mapped.xtc")  # reference
@@ -138,7 +162,7 @@ fig = shaker.plot_bonded_distributions(
 )
 ```
 
-### 6. Assess model quality
+## 6. Assess model quality
 
 Visualize the CG ensemble and quantify how well the CG model reproduces the
 reference structural distributions with the overlap matrix.

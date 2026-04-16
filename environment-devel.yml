@@ -19,3 +19,4 @@ dependencies:
     - pydata-sphinx-theme
     - numpydoc
     - sphinx-design
+    - pytest
