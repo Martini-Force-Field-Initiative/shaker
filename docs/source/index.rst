@@ -75,20 +75,31 @@ Features
 Installation
 ------------
 
+Clone the repository and create a conda environment with the dependencies
+
 .. code-block:: bash
 
-   # From source
    git clone https://github.com/Lp0lp/shaker.git
    cd shaker
-   pip install -e .
+   conda env create -f environment-user.yml
 
-   # Or directly
-   pip install git+https://github.com/Lp0lp/shaker.git
+Test the package with pytest
+
+.. code-block:: bash
+
+   pytest -v tests/
+
+Install SHAKER using pip
+
+.. code-block:: bash
+
+   pip install .
+
 
 Requirements
 ------------
 
-- Python >= 3.9
+- Python >= 3.10
 - `MDAnalysis <https://www.mdanalysis.org/>`_
 - `NumPy <https://numpy.org/>`_
 - `SciPy <https://scipy.org/>`_

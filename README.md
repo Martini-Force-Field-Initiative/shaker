@@ -22,19 +22,24 @@ It provides modular utilities for mapping atomistic trajectories to CG represent
 
 ## Installation
 
+Clone the repository and create a conda environment with the dependencies
 ```bash
-# From source
 git clone https://github.com/Lp0lp/shaker.git
 cd shaker
-pip install -e .
-
-# Or directly
-pip install git+https://github.com/Lp0lp/shaker.git
+conda env create -f environment-user.yml
+```
+Test the package with pytest
+```bash
+pytest -v tests/
+```
+Install SHAKER using pip
+```bash
+pip install .
 ```
 
 ### Requirements
 
-- Python >= 3.9
+- Python >= 3.10
 - [MDAnalysis](https://www.mdanalysis.org/)
 - [NumPy](https://numpy.org/)
 - [SciPy](https://scipy.org/)
