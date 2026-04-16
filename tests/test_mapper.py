@@ -9,6 +9,15 @@ import numpy as np
 import pytest
 import MDAnalysis as mda
 
+pytestmark = [
+    pytest.mark.filterwarnings(
+        r"ignore:Reader has no dt information, set to 1\.0 ps:UserWarning:MDAnalysis\.coordinates\.XTC"
+    ),
+    pytest.mark.filterwarnings(
+        r"ignore:Empty box \[0\., 0\., 0\.\] found - treating as missing unit cell.*:UserWarning:MDAnalysis\.coordinates\.GRO"
+    ),
+]
+
 from shaker.mapper import map_aa2cg
 
 
