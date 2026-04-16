@@ -9,7 +9,7 @@ internal units).
 import numpy as np
 import pytest
 
-from tests.conftest import make_universe
+from conftest import make_universe
 from shaker.measurer import measure_bonded_terms
 
 
