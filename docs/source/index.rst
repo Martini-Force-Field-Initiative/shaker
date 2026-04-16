@@ -75,20 +75,55 @@ Features
 Installation
 ------------
 
+### Step1:
+
+Clone the repository
+
 .. code-block:: bash
 
    # From source
    git clone https://github.com/Lp0lp/shaker.git
-   cd shaker
-   pip install -e .
 
-   # Or directly
-   pip install git+https://github.com/Lp0lp/shaker.git
+Create a virtual environment with the dependencies (e.g. with **conda**):
+
+.. code-block:: bash
+
+   cd shaker
+   conda env create -f environment-user.yml
+
+This will create a conda environment with the name shaker-env.
+
+***OR*** with **venv**:
+
+.. code-block:: bash
+
+   cd shaker
+   python3 -m venv shaker-venv
+
+This will create a venv environment with the name shaker-env.
+
+Then activate your respective environment.
+
+### Step2:
+
+Install SHAKER with pip:
+
+.. code-block:: bash
+
+   pip install .
+
+### Step3:
+
+Test the package with pytest
+
+.. code-block:: bash
+
+   pytest -v tests/
 
 Requirements
 ------------
 
-- Python >= 3.9
+- Python >= 3.10
 - `MDAnalysis <https://www.mdanalysis.org/>`_
 - `NumPy <https://numpy.org/>`_
 - `SciPy <https://scipy.org/>`_

@@ -64,7 +64,7 @@ All the tests should pass, if not please open an issue.
 
 ## Requirements
 
-- Python >= 3.9
+- Python >= 3.10
 - [MDAnalysis](https://www.mdanalysis.org/)
 - [NumPy](https://numpy.org/)
 - [SciPy](https://scipy.org/)
