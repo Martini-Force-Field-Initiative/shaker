@@ -34,6 +34,7 @@ pytest -v tests/
 ```
 Install SHAKER using pip
 ```bash
+cd shaker
 pip install .
 ```
 
