@@ -1,11 +1,15 @@
-User guide
+Tutorials
 ====================
 
-This file serves as a landing page for the quickstart guide of your project. It
-must link to deeper looks into the use of the main files that will be used by
-the other developers. In this example case, we will link to two other files:
+Tutorials demonstrating the main features and workflows of SHAKER.
+Note that you are encouraged to explore the Jupyter notebooks for these tutorials in the "tutorials" 
+directory of the GitHub repository so you can observe the output.
 
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Getting started
+   :maxdepth: 1
+   :caption: Tutorials
+
+   tutorials/Parameterize_with_Shaker_Tutorial
+   tutorials/Complex_forward_mapping_with_Shaker
+   tutorials/Type3VSwithShaker

@@ -1,8 +1,3 @@
-.. shaker documentation master file, created by
-   sphinx-quickstart on Tue Apr 14 14:08:32 2026.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
 SHAKER Documentation
 ====================
 `Licenced with LGPLv2.1 <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html>`_
@@ -29,12 +24,11 @@ visualizing CG models — all designed for interactive use in Jupyter notebooks.
       :text-align: center
       :shadow: sm
 
-      **User guide**
+      **Tutorials**
 
       ^^^^^^^^^^^^^^
 
-      The user guide provides in-depth information on the key concepts of the
-      features with useful background information and explanation.
+      The tutorial page provides step-by-step Jupyter notebooks demonstrating the main features and workflows of SHAKER.
 
       ++++++++++
 
@@ -42,7 +36,7 @@ visualizing CG models — all designed for interactive use in Jupyter notebooks.
          :color: primary
          :expand:
 
-         To the User guide
+         To the Tutorials
 
    .. grid-item-card::
       :text-align: center
@@ -212,14 +206,4 @@ The overlap matrix produces an N×N heatmap of overlap coefficients (0–1) for
 every bead pair, plus a per-bead mean column on the right. Values close to 1
 indicate the CG model faithfully reproduces the reference geometry; low values
 flag which beads need further refinement.
-
-
-Tutorials
----------
-
-Step-by-step Jupyter notebooks are available in `tutorials/`:
-
-- 1 — Basic Parameterization: tutorials/1_BasicParameterization/Parameterize_with_Shaker_Tutorial.ipynb
-- 2 — Complex Mapping: tutorials/2_ComplexMapping/Complex_forward_mapping_with_Shaker.ipynb
-- 3 — Virtual Sites: tutorials/3_Type3VS/Type3VSwithShaker.ipynb
 

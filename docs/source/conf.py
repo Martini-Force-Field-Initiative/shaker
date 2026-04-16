@@ -22,7 +22,7 @@ release = '0.1.0'
 extensions = [
     'numpydoc',             # NumPy documentation
     'sphinx.ext.viewcode',  # Link to local code
-    'myst_parser',          # For using Markdown inside reST
+    'myst_nb',              # Jupyter notebooks & Markdown (superset of myst_parser)
     'sphinx_design',        # To add buttons and cards
 ]
 
@@ -51,8 +51,10 @@ autodoc_typehints = "none"
 autosummary_generate = True
 autosummary_generate_overwrite = True
 
-# MyST
+# MyST / myst-nb
 myst_heading_anchors = 4
+nb_execution_mode = "off"           # Never execute notebooks during build
+nb_remove_code_outputs = True       # Strip all outputs at build time
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
@@ -60,8 +62,8 @@ myst_heading_anchors = 4
 html_theme = 'pydata_sphinx_theme' 
 html_static_path = ['_static']
 html_show_sourcelink = False
-# -- Theme configuration -----------------------------------------------------
 
+# -- Theme configuration -----------------------------------------------------
 
 # Sidebar configuration
 
@@ -80,10 +82,15 @@ html_theme_options = {
     'navbar_end': ['theme-switcher', 'navbar-icon-links'],
     # Icon links
     "icon_links": [
-        # GitHub of the proyect
+        # GitHub of the project
         {"name": "GitHub",
          "url": "https://github.com/Lp0lp/shaker",
          "icon": "fa-brands fa-square-github",
          "type": "fontawesome",}
     ]
 }
+
+myst_enable_extensions = [
+    "dollarmath",
+    "amsmath",
+]

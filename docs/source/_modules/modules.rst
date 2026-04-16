@@ -11,6 +11,7 @@ For a description of the module's functions click on the module's name.
 
    dihedral_fitting
    estimator
+   helper
    itp
    mapper
    measurer

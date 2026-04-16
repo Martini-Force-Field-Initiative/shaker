@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>61,<81", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,18 +7,20 @@ name = "shaker"
 version = "0.1.0"
 description = "A Toolkit for the parameterization of physics-based force fields."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
   { name = "Luís Borges Araújo", email = "luis.borges@ens-lyon.fr"},
   { name = "Pablo Cardona Perez", email = "pablo.cardona_perez@ens-lyon.fr" }
 ]
 dependencies = [
+"ipywidgets==8.1.8",
 "numpy",
+"matplotlib", 
 "scipy",
-"matplotlib",
-"rdkit",
-"nglview",
-"tqdm"
+"mdanalysis",
+"tqdm",
+"nglview==3.1.4",
+"rdkit"
 ]
 
 [tool.setuptools]

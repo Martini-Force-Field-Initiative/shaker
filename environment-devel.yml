@@ -1,0 +1,21 @@
+name: shaker-env-devel
+
+channels:
+    - conda-forge
+    - nodefaults
+
+dependencies:
+    - python>=3.10
+    - ipywidgets==8.1.1
+    - numpy
+    - matplotlib 
+    - scipy
+    - tqdm
+    - rdkit
+    - mdanalysis
+    - nglview==3.0.8
+    - sphinx
+    - myst-nb
+    - pydata-sphinx-theme
+    - numpydoc
+    - sphinx-design

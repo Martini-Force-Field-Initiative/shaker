@@ -7,7 +7,7 @@
 __pycache__/
 *.pyc
 *.pyo
-
+build/
 .git/
 
 # Sphinx documentation
