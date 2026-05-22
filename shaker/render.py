@@ -444,8 +444,11 @@ def _load_mols(pdb_file):
     if molH is None:
         raise ValueError(f"Could not read PDB: {pdb_file}")
 
-    rdDetermineBonds.DetermineBonds(molH)
-    Chem.SanitizeMol(molH)
+    try:
+        rdDetermineBonds.DetermineBonds(molH)
+        Chem.SanitizeMol(molH)
+    except ValueError:
+        rdDetermineBonds.DetermineConnectivity(molH)
 
     mol = Chem.RemoveHs(molH)
     AllChem.Compute2DCoords(mol)
