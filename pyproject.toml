@@ -21,7 +21,7 @@ dependencies = [
 "mdanalysis",
 "tqdm",
 "nglview==3.1.4",
-"rdkit",
+"rdkit>=2022.09.1",
 "pytest"
 ]
 
