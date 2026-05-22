@@ -296,8 +296,9 @@ def render_2dMapping(pdb_file, resname, mapping,
 
     bead_names       = list(mapping[resname].keys())
     bead_assignments = [b["atoms"] for b in mapping[resname].values()]
+    net_charge       = sum(b.get("charge", 0) for b in mapping[resname].values())
 
-    molH, mol = _load_mols(pdb_file)
+    molH, mol = _load_mols(pdb_file, charge=net_charge)
     idxH = _atom_name_map(molH, resname)
     idx  = _atom_name_map(mol,  resname)
 
@@ -438,17 +439,18 @@ def render_2dMapping(pdb_file, resname, mapping,
 # Private helpers
 # ---------------------------------------------------------------------------
 
-def _load_mols(pdb_file):
-    """Return (molH, mol): sanitized molecule with Hs, and no-H molecule with 2D coords."""
+def _load_mols(pdb_file, charge=0):
+    """Return (molH, mol): sanitized molecule with Hs, and no-H molecule with 2D coords.
+
+    ``charge`` should be the expected net charge of the molecule (e.g. sum of bead charges
+    from the mapping).
+    """
     molH = Chem.MolFromPDBFile(pdb_file, sanitize=False, removeHs=False)
     if molH is None:
         raise ValueError(f"Could not read PDB: {pdb_file}")
 
-    try:
-        rdDetermineBonds.DetermineBonds(molH)
-        Chem.SanitizeMol(molH)
-    except ValueError:
-        rdDetermineBonds.DetermineConnectivity(molH)
+    rdDetermineBonds.DetermineBonds(molH, charge=charge)
+    Chem.SanitizeMol(molH)
 
     mol = Chem.RemoveHs(molH)
     AllChem.Compute2DCoords(mol)
