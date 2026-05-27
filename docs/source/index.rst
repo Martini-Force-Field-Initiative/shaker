@@ -2,8 +2,8 @@ SHAKER Documentation
 ====================
 `Licenced with LGPLv2.1 <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html>`_
 
-**SHAKER** is a Python toolkit for parameterizing and validating Martini coarse-grained (CG)
-force fields against atomistic or quantum-mechanical reference data.
+**SHAKER** is a Python toolkit for parameterizing molecules with the Martini coarse-grained (CG) force field
+ and validating them against atomistic or quantum-mechanical reference data.
 
 It provides modular utilities for mapping atomistic trajectories to CG representations,
 measuring and fitting bonded distributions, preparing GROMACS simulation systems, and
@@ -62,10 +62,10 @@ Features
 
 - **CG Mapping** — Map AA/QM trajectories to CG beads with flexible bead definitions; generates mapping quality reports with Martini 3 tolerance checks
 - **Bonded Analysis** — Measure and compare distance, angle, and dihedral distributions between reference and CG simulations
-- **Parameter Estimation** — Estimate initial GROMACS bonded parameters (bonds, angles, proper/improper dihedrals) via equipartition theorem and inverted Boltzmann
+- **Parameter Estimation** — Estimate initial GROMACS bonded parameters (bonds, angles, proper/improper dihedrals)
 - **Dihedral Fitting** — Advanced dihedral fitting with Savitzky-Golay smoothing and multi-term cosine series
 - **SASA** — Compute solvent-accessible surface areas with CG-specific van der Waals radii
-- **Virtual Sites** — Generate and optimize type-3 virtual site definitions
+- **Virtual Sites** — Generate topolgies that use type-3 virtual site definitions
 - **Model Quality Assessment** — Evaluate CG model accuracy via pairwise intra-bead distance overlap matrices and ensemble visualization
 - **System Setup** — Build solvated Martini simulation boxes and run GROMACS minimization/production MD with minimal boilerplate
 - **Visualization** — Render 3D mapping overlays, Connolly surfaces, molecular ensembles, and 2D chemical structures
