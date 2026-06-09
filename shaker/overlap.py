@@ -200,7 +200,7 @@ def assess_overlap_matrix(u_aa, u_cg, resname,
                            vmin=0, vmax=1,
                            cell_fontsize=11,
                            title='Intra-bead Distance Overlap',
-                           save_npy=False, outname=''):
+                           plot=True, save_npy=False, outname=''):
     '''
     Assess CG parameterisation quality by comparing intra-bead distance
     distributions between AA and CG trajectories.
@@ -241,6 +241,9 @@ def assess_overlap_matrix(u_aa, u_cg, resname,
         Font size for overlap values inside each cell (default: 11).
     title : str, optional
         Title for the overlap matrix plot.
+    plot : bool, optional
+        If true, plots overlap matrix figure. Otherwise, simply returns the 
+        numerical matrix as part of the overlap_results dict.
     save_npy : bool, optional
         If True, saves raw and histogram arrays to .npy files.
     outname : str, optional
@@ -295,10 +298,13 @@ def assess_overlap_matrix(u_aa, u_cg, resname,
                                                save_npy=save_npy,
                                                outname=outname + '_cg' if outname else '')
     oc        = _compute_overlap_matrix(results_aa, results_cg)
-    fig, axes = _plot_overlap_matrix(oc, vmin=vmin, vmax=vmax, title=title,
-                                     cell_fontsize=cell_fontsize)
 
-    if outname:
-        fig.savefig(f'{outname}_overlap_matrix.png', dpi=150)
+    if not plot:
+        return oc
+    else:
+        fig, axes = _plot_overlap_matrix(oc, vmin=vmin, vmax=vmax, title=title,
+                                        cell_fontsize=cell_fontsize)
+        if outname:
+            fig.savefig(f'{outname}_overlap_matrix.png', dpi=150)
 
-    return oc, fig, axes
+        return oc, fig, axes
