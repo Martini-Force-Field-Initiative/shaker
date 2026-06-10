@@ -300,7 +300,7 @@ def assess_overlap_matrix(u_aa, u_cg, resname,
     oc        = _compute_overlap_matrix(results_aa, results_cg)
 
     if not plot:
-        return oc
+        return oc, None, None
     else:
         fig, axes = _plot_overlap_matrix(oc, vmin=vmin, vmax=vmax, title=title,
                                         cell_fontsize=cell_fontsize)
