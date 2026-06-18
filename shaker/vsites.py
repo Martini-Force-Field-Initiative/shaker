@@ -130,8 +130,8 @@ def generate_virtual_sites3(universe, frame_names,
         atom names ("name") in the generated topology entries.
     c_cutoff : float, optional
         Threshold for switching between GROMACS virtual_sites3 function
-        types 3 and 4. If ``abs(c) < c_cutoff``, the site is written as
-        function type 3 using only ``a`` and ``b``. Otherwise function
+        types 1 and 4. If ``abs(c) < c_cutoff``, the site is written as
+        function type 1 using only ``a`` and ``b``. Otherwise function
         type 4 is used with ``a``, ``b``, and ``c``.
     include_constraints : bool, optional
         Whether to include a [constraints] section for the three frame atoms.
@@ -241,7 +241,7 @@ def generate_virtual_sites3(universe, frame_names,
 
         a, b, c = factors[i]
         if abs(c) < c_cutoff:
-            lines.append(f"{_atom_label(cgats, i, output):>6}   {frame_txt}   3  {a:.5f}  {b:.5f}")
+            lines.append(f"{_atom_label(cgats, i, output):>6}   {frame_txt}   1  {a:.5f}  {b:.5f}")
         else:
             lines.append(f"{_atom_label(cgats, i, output):>6}   {frame_txt}   4  {a:.5f}  {b:.5f}  {c:.5f}")
     lines.append("")
