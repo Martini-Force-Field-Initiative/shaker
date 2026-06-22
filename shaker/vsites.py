@@ -3,9 +3,150 @@
 import numpy as np
 import MDAnalysis as md
 from MDAnalysis.analysis import align
+from scipy.optimize import lsq_linear
 import itertools
 from tqdm.autonotebook import tqdm
 from .helper import _bead_mass_from_type
+
+
+def _atom_label(atom_group, i, output):
+    """
+    Return a GROMACS-compatible label for atom at local index ``i``.
+
+    Parameters
+    ----------
+    atom_group : MDAnalysis.AtomGroup
+        The atom group containing the atom.
+    i : int
+        Local index within ``atom_group``.
+    output : {"index", "name"}
+        Label type: 1-based integer index or atom name.
+
+    Returns
+    -------
+    str
+        Atom label string.
+    """
+    if output == "index":
+        return str(atom_group.indices[i] + 1)
+    if output == "name":
+        return str(atom_group.names[i])
+    raise ValueError("output must be 'index' or 'name'")
+
+
+def _resolve_frame_atoms(cgats, frame_names, output):
+    """
+    Resolve frame atom names to local indices within ``cgats`` and return the
+    associated bookkeeping needed by virtual-site builders.
+
+    Parameters
+    ----------
+    cgats : MDAnalysis.AtomGroup
+        Atom group containing the CG selection.
+    frame_names : sequence of str
+        Names of the frame atoms, in order.
+    output : {"index", "name"}
+        Label type passed through to ``_atom_label``.
+
+    Returns
+    -------
+    tuple
+        A 4-tuple containing:
+
+        frame : numpy.ndarray of int
+            Local indices (within ``cgats``) of the frame atoms, in the
+            order given by ``frame_names``.
+
+        frame_set : set of int
+            Same indices as a set, for O(1) membership checks.
+
+        frame_pos : numpy.ndarray, shape (N, 3)
+            Positions of the frame atoms, in Å (as stored by MDAnalysis;
+            callers should convert to nm if needed).
+
+        frame_labels : list of str
+            GROMACS-compatible labels for the frame atoms.
+
+    Raises
+    ------
+    ValueError
+        If any frame atom name is not found or not unique in ``cgats``.
+    """
+    index_map = {idx: i for i, idx in enumerate(cgats.indices)}
+
+    frame_local_indices = []
+    for name in frame_names:
+        matches = cgats.select_atoms(f"name {name}")
+        if len(matches) == 0:
+            raise ValueError(f"No atom named {name!r} found in selection")
+        if len(matches) > 1:
+            raise ValueError(f"Atom name {name!r} is not unique in selection "
+                             f"({len(matches)} matches found)")
+        frame_local_indices.append(index_map[matches.indices[0]])
+
+    frame = np.array(frame_local_indices, dtype=int)
+    frame_set = set(frame.tolist())
+    frame_pos = cgats.positions[frame].copy()
+    frame_labels = [_atom_label(cgats, i, output) for i in frame]
+
+    return frame, frame_set, frame_pos, frame_labels
+
+
+def _solve_vsiten_weights(A, frame_pos, target, original,
+                           weight_cutoff, reconstruction_cutoff,
+                           atom_name_for_error):
+    """
+    Solve for non-negative, normalized center-of-weights coefficients for a
+    single virtual site and validate the reconstruction quality.
+
+    Parameters
+    ----------
+    A : numpy.ndarray, shape (4, N)
+        Linear system matrix: frame positions stacked with a row of ones to
+        enforce ``sum(w) = 1``.
+    frame_pos : numpy.ndarray, shape (N, 3)
+        Frame atom positions, in nm.
+    target : numpy.ndarray, shape (3,)
+        Position to solve for (may be a plane-projected version of
+        ``original`` for the N=4 coplanar case).
+    original : numpy.ndarray, shape (3,)
+        The true, unprojected position of the virtual site, in nm. Used to
+        validate the final reconstruction regardless of what ``target`` was.
+    weight_cutoff : float
+        Weights below this threshold are set to zero before renormalizing.
+    reconstruction_cutoff : float
+        Maximum allowed distance, in nm, between ``original`` and the
+        position reconstructed from the solved weights.
+    atom_name_for_error : str
+        Atom name to include in the error message if validation fails.
+
+    Returns
+    -------
+    numpy.ndarray, shape (N,)
+        Normalized, non-negative weights for the frame atoms.
+
+    Raises
+    ------
+    ValueError
+        If the reconstruction error exceeds ``reconstruction_cutoff``.
+    """
+    b = np.append(target, 1.0)
+    result = lsq_linear(A, b, bounds=(0, 1))
+    w_full = result.x
+
+    # Always validate against the ORIGINAL position, never the (possibly
+    # projected) target, so projection error itself is also caught here.
+    error = np.linalg.norm(frame_pos.T @ w_full - original)
+    if error > reconstruction_cutoff:
+        raise ValueError(
+            f"Atom {atom_name_for_error!r} could not be accurately reconstructed "
+            f"from the frame atoms (error={error:.2e} nm). "
+            "Check your frame selection or structure.")
+
+    w_full[w_full < weight_cutoff] = 0.0
+    w_full /= w_full.sum()  # renormalize after zeroing
+    return w_full
+
 
 def align_mol_to_single_traj(topology, trajectory,
                              selection="resname MOL",
@@ -190,20 +331,8 @@ def generate_virtual_sites3(universe, frame_names,
     if len(frame_names) != 3:
         raise ValueError("frame_names must contain exactly 3 atom names")
 
-    frame_universe_indices = []
-    for name in frame_names:
-        matches = cgats.select_atoms(f"name {name}")
-        if len(matches) == 0:
-            raise ValueError(f"No atom named {name!r} found in selection")
-        if len(matches) > 1:
-            raise ValueError(f"Atom name {name!r} is not unique in selection "
-                             f"({len(matches)} matches found)")
-        frame_universe_indices.append(matches.indices[0])
-
-    # Map universe indices to local cgats indices
-    index_map = {idx: i for i, idx in enumerate(cgats.indices)}
-    frame = np.array([index_map[idx] for idx in frame_universe_indices], dtype=int)
-    frame_set = set(frame.tolist())
+    frame, frame_set, _, frame_labels = _resolve_frame_atoms(
+        cgats, frame_names, output)
 
     # Work entirely in nm
     pos = cgats.positions.copy() * 0.1
@@ -223,7 +352,6 @@ def generate_virtual_sites3(universe, frame_names,
     factors = pos @ inv_basis
 
     lines = []
-    frame_labels = [_atom_label(cgats, i, output) for i in frame]
     frame_txt = "  ".join(frame_labels)
 
     if include_constraints:
@@ -272,19 +400,22 @@ def generate_virtual_sitesN(universe, frame_names,
                              selection="all", output="index",
                              include_exclusions=True,
                              weight_cutoff=1e-6,
+                             reconstruction_cutoff=1e-3,
+                             planar_tolerance=1e-2,
                              mass_split=None, mapping=None, resname=None):
     """
     Build GROMACS [virtual_sitesn] and [exclusions] entries from an existing
     CG structure using a linear combination of N frame atoms with relative
     weights (center of weights, function type 3).
 
-    For each non-frame atom in the selection, the normalized weights are found
-    analytically by solving:
+    For each non-frame atom in the selection, non-negative normalized weights
+    are found by solving the bounded least-squares problem:
 
     .. math::
 
-        \\mathbf{r}_s = \\sum_{i=1}^N w_i \\, \\mathbf{r}_i,
-        \\quad \\sum_{i=1}^N w_i = 1
+        \\min_w \\|\\mathbf{r}_s - \\sum_{i=1}^N w_i \\, \\mathbf{r}_i\\|^2
+        \\quad \\text{subject to} \\quad
+        \\sum_{i=1}^N w_i = 1, \\quad w_i \\geq 0
 
     Parameters
     ----------
@@ -293,8 +424,7 @@ def generate_virtual_sitesN(universe, frame_names,
         structure (this construction is only meaningful for rigid molecules).
     frame_names : sequence of str
         Names of the N atoms defining the constructing frame, in order.
-        Must contain at least 2 atoms and at most 4 atoms (3 spatial dimensions
-        limit the system to N-1 <= 3 independent weights).
+        Must contain between 2 and 4 atoms.
     selection : str, optional
         Atom selection defining which atoms participate. Frame atoms and
         virtual sites must all be within this selection. Default is "all".
@@ -306,6 +436,16 @@ def generate_virtual_sitesN(universe, frame_names,
         the selected group from one another.
     weight_cutoff : float, optional
         Weights below this threshold are set to zero. Default is 1e-6.
+    reconstruction_cutoff : float, optional
+        Maximum allowed reconstruction error, in nm, between the original
+        virtual site position and the position reconstructed from the
+        solved weights. Default is 1e-3 nm.
+    planar_tolerance : float, optional
+        Relative threshold for deciding whether 4 frame atoms are coplanar.
+        The frame is considered planar if the smallest singular value of the
+        centered frame positions is smaller than ``planar_tolerance`` times
+        the largest singular value. Default is 1e-2. Only used when
+        ``len(frame_names) == 4``.
     mass_split : {None, "equal"}, optional
         Optional mass redistribution scheme. If ``None`` (default), no
         mass handling is performed. If ``"equal"``, the total mass of the
@@ -335,14 +475,32 @@ def generate_virtual_sitesN(universe, frame_names,
     ------
     ValueError
         If any frame atom is not found or not unique in the selection,
-        if fewer than 2 or more than 4 frame atoms are provided, if the
-        frame atoms are collinear (underdetermined system), or if any solved
-        weight is negative beyond ``weight_cutoff``.
+        if fewer than 2 or more than 4 frame atoms are provided, or if
+        the reconstruction error exceeds ``reconstruction_cutoff``.
 
     Notes
     -----
     Coordinates are internally converted from Å to nm to match GROMACS
     topology units.
+
+    With 2 or 3 frame atoms, the system has more equations (3 spatial + 1
+    sum-to-1) than unknowns, so it is solved in a least-squares sense. Any
+    component of the virtual site that lies outside the line/plane spanned by
+    the frame atoms is absorbed as residual error and naturally caught by
+    ``reconstruction_cutoff``.
+
+    With 4 frame atoms, the system is exactly square (4 equations, 4
+    unknowns). If the 4 frame atoms are coplanar, this exact system becomes
+    nearly singular, so even sub-angstrom out-of-plane noise from trajectory
+    averaging can be amplified into large, unphysical (including negative)
+    weights for a site that is geometrically well-placed. To avoid this, when
+    4 frame atoms are detected to be (nearly) coplanar, each virtual site is
+    projected onto the frame's best-fit plane before solving, removing the
+    noise the unstable direction would otherwise amplify. If the 4 frame
+    atoms are genuinely non-coplanar (e.g. tetrahedral), the system is
+    well-conditioned and solved directly. In all cases, the final
+    reconstruction error is checked against the original (unprojected)
+    position, so genuinely bad frame choices are still caught.
 
     The topology block format is:
 
@@ -366,32 +524,29 @@ def generate_virtual_sitesN(universe, frame_names,
     if len(cgats) == 0:
         raise ValueError(f"No atoms matched selection {selection!r}")
 
-    index_map = {idx: i for i, idx in enumerate(cgats.indices)}
-
-    frame_local_indices = []
-    for name in frame_names:
-        matches = cgats.select_atoms(f"name {name}")
-        if len(matches) == 0:
-            raise ValueError(f"No atom named {name!r} found in selection")
-        if len(matches) > 1:
-            raise ValueError(f"Atom name {name!r} is not unique in selection "
-                             f"({len(matches)} matches found)")
-        frame_local_indices.append(index_map[matches.indices[0]])
-
-    frame = np.array(frame_local_indices, dtype=int)
-    frame_set = set(frame.tolist())
+    frame, frame_set, _, frame_labels = _resolve_frame_atoms(
+        cgats, frame_names, output)
 
     # Work in nm
     pos = cgats.positions.copy() * 0.1
     frame_pos = pos[frame]  # shape (N, 3)
 
-    # Build the least-squares system enforcing sum(w) = 1
-    # Substituting w_N = 1 - sum(w_1..w_{N-1}):
-    # r_s - r_N = sum_{i=0}^{N-2} w_i * (r_i - r_N)
-    # Shape: (3, N-1)
-    A = (frame_pos[:-1] - frame_pos[-1]).T
+    # Determine whether projection should be applied.
+    # Only relevant for N=4: N<=3 systems are overdetermined and any
+    # out-of-span component is naturally caught by the reconstruction check.
+    apply_projection = False
+    frame_centroid = None
+    plane_normal = None
 
-    frame_labels = [_atom_label(cgats, i, output) for i in frame]
+    if len(frame_names) == 4:
+        frame_centroid = frame_pos.mean(axis=0)
+        _, sv, Vt = np.linalg.svd(frame_pos - frame_centroid)
+        if sv[-1] < planar_tolerance * sv[0]:
+            apply_projection = True
+            plane_normal = Vt[-1]
+
+    # System with sum=1 constraint appended: shape (4, N)
+    A = np.vstack([frame_pos.T, np.ones(len(frame_pos))])
 
     lines = []
     lines.append("[ virtual_sitesn ]")
@@ -401,25 +556,17 @@ def generate_virtual_sitesN(universe, frame_names,
         if i in frame_set:
             continue
 
-        rhs = pos[i] - frame_pos[-1]  # shape (3,)
-        w_partial, _, rank, _ = np.linalg.lstsq(A, rhs, rcond=None)
+        if apply_projection:
+            # Remove out-of-plane noise before solving
+            site_target = pos[i] - np.dot(pos[i] - frame_centroid, plane_normal) * plane_normal
+        else:
+            site_target = pos[i]
 
-        if rank < A.shape[1]:
-            raise ValueError(
-                f"Frame atoms are collinear or coplanar in a degenerate way; "
-                f"cannot solve for weights of atom {cgats.names[i]!r}.")
-
-        w_last = 1.0 - w_partial.sum()
-        w_full = np.append(w_partial, w_last)
-        w_full[np.abs(w_full) < weight_cutoff] = 0.0
-
-        if np.any(w_full < 0):
-            raise ValueError(
-                f"Atom {cgats.names[i]!r} produced negative weights {w_full}. "
-                "This suggests the virtual site lies outside the convex hull "
-                "of the frame atoms. Check your frame selection or structure.")
-
-        w_full /= w_full.sum()  # renormalize after zeroing
+        w_full = _solve_vsiten_weights(
+            A, frame_pos, target=site_target, original=pos[i],
+            weight_cutoff=weight_cutoff,
+            reconstruction_cutoff=reconstruction_cutoff,
+            atom_name_for_error=cgats.names[i])
 
         pairs_str = "  ".join(f"{lbl}  {w:.5f}"
                                for lbl, w in zip(frame_labels, w_full))
@@ -448,30 +595,6 @@ def generate_virtual_sitesN(universe, frame_names,
     else:
         return lines, None
 
-
-def _atom_label(atom_group, i, output):
-    """
-    Return a GROMACS-compatible label for atom at local index ``i``.
-
-    Parameters
-    ----------
-    atom_group : MDAnalysis.AtomGroup
-        The atom group containing the atom.
-    i : int
-        Local index within ``atom_group``.
-    output : {"index", "name"}
-        Label type: 1-based integer index or atom name.
-
-    Returns
-    -------
-    str
-        Atom label string.
-    """
-    if output == "index":
-        return str(atom_group.indices[i] + 1)
-    if output == "name":
-        return str(atom_group.names[i])
-    raise ValueError("output must be 'index' or 'name'")
 
 def _add_masses_to_mapping(mapping, resname, selected_names, frame_names, mass_split):
     """
