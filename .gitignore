@@ -8,7 +8,9 @@ __pycache__/
 *.pyc
 *.pyo
 build/
+.pytest_cache/
 .git/
+.claude/
 
 # Sphinx documentation
 docs/build/
@@ -17,12 +19,25 @@ docs/source/_modules/_generated/
 .doctrees/
 
 
-# Ignore everything (output) in the 1_BasicParameterization and AA-reference directories 
+# Ignore everything (output) in the tutorial subfolders
 tutorials/1_BasicParameterization/*
+tutorials/2_Complex_forward_mapping/*
+tutorials/3_VirtualSites/*
+tutorials/AA_references/*
 tutorials/AA_references/BasicParam/*
+tutorials/AA_references/VirtualSites/*
 
 # Except for the notebook and the structure and trajectory files
 !tutorials/1_BasicParameterization/Basic_parameterization.ipynb
-!tutorials/AA_references/AA.pdb
-!tutorials/AA_references/AA.xtc
-!tutorials/AA_references/initial_itp.itp
+!tutorials/2_Complex_forward_mapping/Complex_forward_mapping.ipynb
+!tutorials/3_VirtualSites/VirtualSiteswithShaker.ipynb
+
+!tutorials/AA_references/BasicParam/
+!tutorials/AA_references/BasicParam/AA.pdb
+!tutorials/AA_references/BasicParam/AA.xtc
+!tutorials/AA_references/BasicParam/initial_itp.itp
+!tutorials/AA_references/VirtualSites/
+!tutorials/AA_references/VirtualSites/cg.pdb
+
+# venv
+shaker-venv/

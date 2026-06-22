@@ -12,4 +12,4 @@ directory of the GitHub repository so you can observe the output.
 
    tutorials/Parameterize_with_Shaker_Tutorial
    tutorials/Complex_forward_mapping_with_Shaker
-   tutorials/Type3VSwithShaker
+   tutorials/VirtualSiteswithShaker.ipynb
