@@ -8,6 +8,7 @@ __pycache__/
 *.pyc
 *.pyo
 build/
+.pytest_cache/
 .git/
 .claude/
 
