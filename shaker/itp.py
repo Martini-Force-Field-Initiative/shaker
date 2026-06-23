@@ -2,7 +2,9 @@
 
 from pathlib import Path
 
-def write_initial_CGitp (resname, mapping, 
+from .helper import _validate_bead_types
+
+def write_initial_CGitp (resname, mapping,
                          filename="initial_CG.itp",
                          header=None, footer=None):    
     """
@@ -44,9 +46,10 @@ def write_initial_CGitp (resname, mapping,
 
     if resname not in mapping:
         raise ValueError(f"No mapping found for resname '{resname}'")
-        
+
     filename = Path(filename).resolve()
     beads = mapping[resname]
+    _validate_bead_types(beads)
     
     def _normalize(x):
         if x is None:
