@@ -15,7 +15,8 @@ from .helper import _category_from_type
 def render_2dMapping(pdb_file, resname, mapping,
                      out_svg="cg_overlay.svg", size=(950, 480), mode="connected",
                      bead_r=30.0, conn_r=30.0, alpha=0.2, line_w=3.0,
-                     font_size=35, label_dy=20.0, net_charge=None):
+                     font_size=35, label_dy=20.0, net_charge=None,
+                     show_bead_type=False):
     """
     Render a 2D atomistic structure with an overlaid coarse-grained (CG) mapping.
 
@@ -72,6 +73,10 @@ def render_2dMapping(pdb_file, resname, mapping,
         ``"charge"`` entries in ``mapping[resname]``; this requires every
         bead in the mapping to define a ``"charge"``, and the sum must be
         a whole number.
+    show_bead_type : bool, optional
+        If True, show each bead's ``"type"`` (if defined) in italics on a
+        second line under its name label. Beads without a ``"type"``
+        simply get no second line. Default is False.
 
     Returns
     -------
@@ -212,9 +217,14 @@ def render_2dMapping(pdb_file, resname, mapping,
                 f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{bead_r:.2f}" '
                 f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
 
+        bead_type = bead_map[label].get("type") if show_bead_type else None
+        type_font_size = font_size * 0.7
+
         label_offset = max(bead_r, conn_r) + 2
         label_width  = len(label) * font_size * 0.6
-        if cx + label_offset + label_width > w:
+        type_width   = len(bead_type) * type_font_size * 0.6 if bead_type else 0.0
+        width        = max(label_width, type_width)
+        if cx + label_offset + width > w:
             tx     = cx - label_offset
             anchor = "end"
         else:
@@ -222,8 +232,13 @@ def render_2dMapping(pdb_file, resname, mapping,
             anchor = "start"
         ty = cy + label_dy
 
-        label_specs.append({"label": label, "tx": tx, "ty": ty,
-                            "anchor": anchor, "edge": label_color, "width": label_width})
+        height = font_size * 1.2
+        if bead_type:
+            height += type_font_size * 1.2
+
+        label_specs.append({"label": label, "type": bead_type, "tx": tx, "ty": ty,
+                            "anchor": anchor, "edge": label_color, "width": width,
+                            "height": height, "type_font_size": type_font_size})
 
     _avoid_label_collisions(label_specs, font_size)
 
@@ -238,6 +253,19 @@ def render_2dMapping(pdb_file, resname, mapping,
             f'font-size="{font_size}" font-weight="bold" dominant-baseline="middle" '
             f'text-anchor="{spec["anchor"]}" fill="{spec["edge"]}">{spec["label"]}</text>')
 
+        if spec["type"]:
+            type_font_size = spec["type_font_size"]
+            type_ty = spec["ty"] + font_size * 0.5 + type_font_size * 0.5 + 2
+            label_layer.append(
+                f'<text x="{spec["tx"]:.2f}" y="{type_ty:.2f}" font-family="sans-serif" '
+                f'font-size="{type_font_size:.2f}" font-style="italic" dominant-baseline="middle" '
+                f'text-anchor="{spec["anchor"]}" stroke="white" stroke-width="2" fill="white">'
+                f'{spec["type"]}</text>')
+            label_layer.append(
+                f'<text x="{spec["tx"]:.2f}" y="{type_ty:.2f}" font-family="sans-serif" '
+                f'font-size="{type_font_size:.2f}" font-style="italic" dominant-baseline="middle" '
+                f'text-anchor="{spec["anchor"]}" fill="{spec["edge"]}">{spec["type"]}</text>')
+
     overlay = ['<g id="cg_overlay">'] + shading_layer + label_layer + ['</g>']
 
     parts = svg.rsplit("</svg>", 1)
@@ -246,10 +274,6 @@ def render_2dMapping(pdb_file, resname, mapping,
     Path(out_svg).write_text(svg, encoding="utf-8")
     return svg
 
-
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
 
 def _load_mols(pdb_file, resname, net_charge):
     """
@@ -442,19 +466,20 @@ def _avoid_label_collisions(label_specs, font_size, min_gap=2.0):
     Processes labels in their original (bead) order and pushes each one
     down past any already-placed label whose approximate bounding box it
     would otherwise overlap. Bounding boxes reuse each spec's ``"width"``
-    (the same estimate already used for the initial canvas-edge
-    placement), so this is a cheap heuristic, not an exact layout solver
-    — it breaks up the common case of directly overlapping labels on
-    adjacent beads, not every possible collision.
+    and ``"height"`` (the same estimates already used for the initial
+    canvas-edge placement; ``"height"`` covers both lines when a bead
+    type subtitle is shown), so this is a cheap heuristic, not an exact
+    layout solver — it breaks up the common case of directly overlapping
+    labels on adjacent beads, not every possible collision.
 
     ``label_specs`` is modified in place: each dict's ``"ty"`` may be
     increased.
     """
-    height = font_size * 1.2
     placed = []  # (x_min, x_max, y_min, y_max) of already-placed labels
 
     for spec in label_specs:
-        width = spec["width"]
+        width  = spec["width"]
+        height = spec.get("height", font_size * 1.2)
         if spec["anchor"] == "start":
             x_min, x_max = spec["tx"], spec["tx"] + width
         else:
@@ -464,7 +489,8 @@ def _avoid_label_collisions(label_specs, font_size, min_gap=2.0):
         moved = True
         while moved:
             moved = False
-            y_min, y_max = ty - height / 2, ty + height / 2
+            y_min = ty - font_size * 0.6
+            y_max = y_min + height
             for px_min, px_max, py_min, py_max in placed:
                 if x_min < px_max and x_max > px_min and y_min < py_max and y_max > py_min:
                     ty += height + min_gap
@@ -472,7 +498,8 @@ def _avoid_label_collisions(label_specs, font_size, min_gap=2.0):
                     break
 
         spec["ty"] = ty
-        placed.append((x_min, x_max, ty - height / 2, ty + height / 2))
+        y_min = ty - font_size * 0.6
+        placed.append((x_min, x_max, y_min, y_min + height))
 
 
 def _palette(n):
