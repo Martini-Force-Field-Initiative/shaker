@@ -97,15 +97,7 @@ def render_2dMapping(pdb_file, resname, mapping,
     bead_assignments = [b["atoms"] for b in bead_map.values()]
 
     if net_charge is None:
-        _require_bead_key(bead_map, "charge", resname,
-                          hint=" Either add 'charge' to every bead in the "
-                               "mapping, or pass net_charge explicitly.")
-        charge_sum = sum(b["charge"] for b in bead_map.values())
-        if charge_sum != int(charge_sum):
-            raise ValueError(
-                f"Bead charges for '{resname}' sum to a non-integer net "
-                f"charge ({charge_sum}); pass net_charge explicitly.")
-        net_charge = int(charge_sum)
+        net_charge = _infer_net_charge(bead_map, resname)
 
     molH, mol = _load_mols(pdb_file, resname, net_charge)
     idxH = _atom_name_map(molH, resname)
@@ -114,7 +106,10 @@ def render_2dMapping(pdb_file, resname, mapping,
     hmap   = _h_to_heavy_map(molH, resname)
     colors = _bead_colors(bead_map)
 
-    missing = sorted({a for bead in bead_assignments for a in bead} - set(idxH))
+    idxH_set = set(idxH)
+    idx_set  = set(idx)
+
+    missing = sorted({a for bead in bead_assignments for a in bead} - idxH_set)
     if missing:
         preview = ", ".join(missing[:20])
         tail = " ..." if len(missing) > 20 else ""
@@ -147,7 +142,7 @@ def render_2dMapping(pdb_file, resname, mapping,
         weights = Counter(hmap.get(a, a) for a in bead)
         weights = Counter({name: wt for name, wt in weights.items() if name in idx})
 
-        dropped = {hmap.get(a, a) for a in bead} & set(idxH) - set(idx)
+        dropped = {hmap.get(a, a) for a in bead} & idxH_set - idx_set
         if dropped:
             warnings.warn(
                 f"Bead '{label}': atoms {sorted(dropped)} exist in the H-mol "
@@ -221,8 +216,8 @@ def render_2dMapping(pdb_file, resname, mapping,
         type_font_size = font_size * 0.7
 
         label_offset = max(bead_r, conn_r) + 2
-        label_width  = len(label) * font_size * 0.6
-        type_width   = len(bead_type) * type_font_size * 0.6 if bead_type else 0.0
+        label_width  = _text_width(label, font_size)
+        type_width   = _text_width(bead_type, type_font_size) if bead_type else 0.0
         width        = max(label_width, type_width)
         if cx + label_offset + width > w:
             tx     = cx - label_offset
@@ -244,30 +239,16 @@ def render_2dMapping(pdb_file, resname, mapping,
     _avoid_label_collisions(label_specs, font_size)
 
     for spec in label_specs:
-        label_layer.append(
-            f'<text x="{spec["tx"]:.2f}" y="{spec["ty"]:.2f}" font-family="sans-serif" '
-            f'font-size="{font_size}" font-weight="bold" dominant-baseline="middle" '
-            f'text-anchor="{spec["anchor"]}" stroke="white" stroke-width="2" fill="white">'
-            f'{spec["label"]}</text>')
-        label_layer.append(
-            f'<text x="{spec["tx"]:.2f}" y="{spec["ty"]:.2f}" font-family="sans-serif" '
-            f'font-size="{font_size}" font-weight="bold" dominant-baseline="middle" '
-            f'text-anchor="{spec["anchor"]}" stroke="{spec["outline"]}" stroke-width="0.8" '
-            f'fill="{spec["edge"]}">{spec["label"]}</text>')
+        label_layer.extend(_halo_text(
+            spec["tx"], spec["ty"], spec["label"], font_size, spec["anchor"],
+            spec["edge"], spec["outline"], stroke_width=0.8, bold=True))
 
         if spec["type"]:
             type_font_size = spec["type_font_size"]
             type_ty = spec["ty"] + font_size * 0.5 + type_font_size * 0.5 + 2
-            label_layer.append(
-                f'<text x="{spec["tx"]:.2f}" y="{type_ty:.2f}" font-family="sans-serif" '
-                f'font-size="{type_font_size:.2f}" font-style="italic" dominant-baseline="middle" '
-                f'text-anchor="{spec["anchor"]}" stroke="white" stroke-width="2" fill="white">'
-                f'{spec["type"]}</text>')
-            label_layer.append(
-                f'<text x="{spec["tx"]:.2f}" y="{type_ty:.2f}" font-family="sans-serif" '
-                f'font-size="{type_font_size:.2f}" font-style="italic" dominant-baseline="middle" '
-                f'text-anchor="{spec["anchor"]}" stroke="{spec["outline"]}" stroke-width="0.6" '
-                f'fill="{spec["edge"]}">{spec["type"]}</text>')
+            label_layer.extend(_halo_text(
+                spec["tx"], type_ty, spec["type"], type_font_size, spec["anchor"],
+                spec["edge"], spec["outline"], stroke_width=0.6, italic=True))
 
     overlay = ['<g id="cg_overlay">'] + shading_layer + label_layer + ['</g>']
 
@@ -418,6 +399,25 @@ def _require_bead_key(bead_map, key, resname, hint=""):
             f"Beads missing a {key!r} entry for resname '{resname}': {missing}.{hint}")
 
 
+def _infer_net_charge(bead_map, resname):
+    """
+    Infer a molecule's net formal charge as the sum of its beads' charges.
+
+    Requires every bead in ``bead_map`` to define a "charge", and the
+    sum to be a whole number; otherwise raises a ValueError pointing to
+    the explicit ``net_charge`` override as the alternative.
+    """
+    _require_bead_key(bead_map, "charge", resname,
+                      hint=" Either add 'charge' to every bead in the "
+                           "mapping, or pass net_charge explicitly.")
+    charge_sum = sum(b["charge"] for b in bead_map.values())
+    if charge_sum != int(charge_sum):
+        raise ValueError(
+            f"Bead charges for '{resname}' sum to a non-integer net "
+            f"charge ({charge_sum}); pass net_charge explicitly.")
+    return int(charge_sum)
+
+
 def _atom_name_map(mol, resname, warn_duplicates=True):
     """
     Map PDB atom name -> RDKit atom index for one residue name.
@@ -460,6 +460,38 @@ def _h_to_heavy_map(molH, resname):
         if nbinfo and _norm_resname(nbinfo) == resname:
             out[info.GetName().strip()] = nbinfo.GetName().strip()
     return out
+
+
+def _text_width(s, font_size):
+    """
+    Rough text width estimate (characters x font size x a fixed average
+    glyph-width factor), used both for canvas-edge label flipping and
+    for the collision-avoidance bounding boxes below.
+    """
+    return len(s) * font_size * 0.6
+
+
+def _halo_text(x, y, text, font_size, anchor, fill_color, outline_color,
+               stroke_width, bold=False, italic=False):
+    """
+    Build the two stacked SVG <text> elements used for every bead label
+    and type subtitle: a white halo pass (so the text stays legible over
+    the structure regardless of what's behind it) followed by the
+    colored, outlined fill pass.
+    """
+    style = ""
+    if bold:
+        style += ' font-weight="bold"'
+    if italic:
+        style += ' font-style="italic"'
+    common = (f'x="{x:.2f}" y="{y:.2f}" font-family="sans-serif" '
+              f'font-size="{font_size:.2f}"{style} dominant-baseline="middle" '
+              f'text-anchor="{anchor}"')
+    return [
+        f'<text {common} stroke="white" stroke-width="2" fill="white">{text}</text>',
+        f'<text {common} stroke="{outline_color}" stroke-width="{stroke_width}" '
+        f'fill="{fill_color}">{text}</text>',
+    ]
 
 
 def _avoid_label_collisions(label_specs, font_size, min_gap=2.0):
