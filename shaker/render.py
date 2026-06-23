@@ -341,7 +341,8 @@ def render_2dMapping(pdb_file, resname, mapping,
     opts.explicitMethyl    = False
     opts.addAtomIndices    = False
     opts.addStereoAnnotation = False
-
+    opts.bondLineWidth = 3.0   
+    
     drawer.DrawMolecule(mol)
 
     draw_coords = {
