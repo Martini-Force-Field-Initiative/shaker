@@ -237,8 +237,9 @@ def render_2dMapping(pdb_file, resname, mapping,
             height += type_font_size * 1.2
 
         label_specs.append({"label": label, "type": bead_type, "tx": tx, "ty": ty,
-                            "anchor": anchor, "edge": label_color, "width": width,
-                            "height": height, "type_font_size": type_font_size})
+                            "anchor": anchor, "edge": label_color, "outline": outline,
+                            "width": width, "height": height,
+                            "type_font_size": type_font_size})
 
     _avoid_label_collisions(label_specs, font_size)
 
@@ -251,7 +252,8 @@ def render_2dMapping(pdb_file, resname, mapping,
         label_layer.append(
             f'<text x="{spec["tx"]:.2f}" y="{spec["ty"]:.2f}" font-family="sans-serif" '
             f'font-size="{font_size}" font-weight="bold" dominant-baseline="middle" '
-            f'text-anchor="{spec["anchor"]}" fill="{spec["edge"]}">{spec["label"]}</text>')
+            f'text-anchor="{spec["anchor"]}" stroke="{spec["outline"]}" stroke-width="0.8" '
+            f'fill="{spec["edge"]}">{spec["label"]}</text>')
 
         if spec["type"]:
             type_font_size = spec["type_font_size"]
@@ -264,7 +266,8 @@ def render_2dMapping(pdb_file, resname, mapping,
             label_layer.append(
                 f'<text x="{spec["tx"]:.2f}" y="{type_ty:.2f}" font-family="sans-serif" '
                 f'font-size="{type_font_size:.2f}" font-style="italic" dominant-baseline="middle" '
-                f'text-anchor="{spec["anchor"]}" fill="{spec["edge"]}">{spec["type"]}</text>')
+                f'text-anchor="{spec["anchor"]}" stroke="{spec["outline"]}" stroke-width="0.6" '
+                f'fill="{spec["edge"]}">{spec["type"]}</text>')
 
     overlay = ['<g id="cg_overlay">'] + shading_layer + label_layer + ['</g>']
 
