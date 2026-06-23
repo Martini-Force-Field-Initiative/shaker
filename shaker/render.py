@@ -1,6 +1,7 @@
 """3D visualization and 2D chemical structure drawing."""
 
 from collections import Counter
+import math
 from pathlib import Path
 import warnings
 
@@ -236,8 +237,8 @@ def render_ensemble(gro, xtc, sel="all", step=None, n_frames=None, size="400px")
 
 def render_2dMapping(pdb_file, resname, mapping,
                      out_svg="cg_overlay.svg", size=(950, 480), mode="connected",
-                     bead_r=20.0, conn_r=12.0, alpha=0.3, line_w=2.0,
-                     font_size=14, label_dy=20.0, net_charge=None):
+                     bead_r=30.0, conn_r=30.0, alpha=0.2, line_w=3.0,
+                     font_size=35, label_dy=20.0, net_charge=None):
     """
     Render a 2D atomistic structure with an overlaid coarse-grained (CG) mapping.
 
@@ -272,9 +273,11 @@ def render_2dMapping(pdb_file, resname, mapping,
     size : tuple of int, optional
         Canvas size in pixels as ``(width, height)``.
     bead_r : float, optional
-        Radius of the centroid circle in SVG units.
+        Radius of the centroid circle in SVG units, used in "circle"/"both"
+        mode and for single-atom beads (no internal bonds) in "connected"
+        mode.
     conn_r : float, optional
-        Half-width of the connectivity stroke / atom blob radius.
+        Half-width of the connected-mode capsule shading / atom blob radius.
     alpha : float, optional
         Fill opacity for bead overlays.
     line_w : float, optional
@@ -341,7 +344,8 @@ def render_2dMapping(pdb_file, resname, mapping,
     opts.explicitMethyl    = False
     opts.addAtomIndices    = False
     opts.addStereoAnnotation = False
-    opts.bondLineWidth = 3.0   
+    opts.bondLineWidth = 3.5   
+    opts.scaleBondWidth = True        
     
     drawer.DrawMolecule(mol)
 
@@ -357,7 +361,7 @@ def render_2dMapping(pdb_file, resname, mapping,
     label_layer   = []
     label_specs   = []
 
-    for bead, label, (r, g, b) in zip(bead_assignments, bead_names, colors):
+    for bead_idx, (bead, label, (r, g, b)) in enumerate(zip(bead_assignments, bead_names, colors)):
         weights = Counter(hmap.get(a, a) for a in bead)
         weights = Counter({name: wt for name, wt in weights.items() if name in idx})
 
@@ -383,35 +387,53 @@ def render_2dMapping(pdb_file, resname, mapping,
         atom_pts    = {name: draw_coords[name] for name in heavy_names if name in draw_coords}
         edges       = _bead_edges(mol, heavy_names, idx)
 
-        fill = _rgba(r, g, b, alpha)
-        edge = _rgb(r, g, b)
+        fill        = _rgba(r, g, b, alpha)
+        label_color = _rgb(r, g, b)
+        outline     = _rgb(*_darken(r, g, b))
 
         if mode in ("connected", "both"):
             if edges:
-                path = " ".join(
-                    f'M {atom_pts[a][0]:.2f},{atom_pts[a][1]:.2f} '
-                    f'L {atom_pts[b2][0]:.2f},{atom_pts[b2][1]:.2f}'
+                # Real closed capsule shapes (not stroked lines), so the
+                # fill/stroke are non-overlapping like a circle's and the
+                # bond underneath shows through. A multi-branch bead has
+                # several capsules in one path; stroking that directly
+                # would draw each capsule's own boundary independently,
+                # crossing at shared joints. Instead, mask a wider, plain
+                # "outline" shape down to a clean ring — wide-minus-narrow,
+                # computed per pixel rather than via separate strokes — so
+                # the outline has no seam regardless of how many branches
+                # meet at a point.
+                narrow = " ".join(
+                    _capsule_path(atom_pts[a], atom_pts[b2], conn_r)
                     for a, b2 in edges
                 )
+                wide = " ".join(
+                    _capsule_path(atom_pts[a], atom_pts[b2], conn_r + line_w)
+                    for a, b2 in edges
+                )
+                mask_id = f"capsule_mask_{bead_idx}"
                 shading_layer.append(
-                    f'<path d="{path}" fill="none" stroke="{fill}" '
-                    f'stroke-width="{2*conn_r:.2f}" stroke-linecap="round" '
-                    f'stroke-linejoin="round" />')
+                    f'<mask id="{mask_id}">'
+                    f'<rect x="0" y="0" width="{w}" height="{h}" fill="white" />'
+                    f'<path d="{narrow}" fill="black" /></mask>')
+                shading_layer.append(
+                    f'<path d="{wide}" fill="{outline}" mask="url(#{mask_id})" />')
+                shading_layer.append(f'<path d="{narrow}" fill="{fill}" />')
             else:
                 shading_layer.append(
-                    f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{conn_r:.2f}" '
-                    f'fill="{fill}" stroke="none" />')
+                    f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{bead_r:.2f}" '
+                    f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
 
         if mode == "atomblobs":
             for x, y in atom_pts.values():
                 shading_layer.append(
                     f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{conn_r:.2f}" '
-                    f'fill="{fill}" stroke="{edge}" stroke-width="{line_w:.2f}" />')
+                    f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
 
         if mode in ("circle", "both"):
             shading_layer.append(
                 f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{bead_r:.2f}" '
-                f'fill="{fill}" stroke="{edge}" stroke-width="{line_w:.2f}" />')
+                f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
 
         label_offset = max(bead_r, conn_r) + 2
         label_width  = len(label) * font_size * 0.6
@@ -424,7 +446,7 @@ def render_2dMapping(pdb_file, resname, mapping,
         ty = cy + label_dy
 
         label_specs.append({"label": label, "tx": tx, "ty": ty,
-                            "anchor": anchor, "edge": edge, "width": label_width})
+                            "anchor": anchor, "edge": label_color, "width": label_width})
 
     _avoid_label_collisions(label_specs, font_size)
 
@@ -695,7 +717,7 @@ _MARTINI_CATEGORY_COLORS = {
     "P": (0.84, 0.15, 0.16),  # red    - polar
     "N": (0.12, 0.47, 0.71),  # blue   - intermediate (semi-polar/apolar)
     "X": (0.17, 0.63, 0.17),  # green  - halocarbon
-    "Q": (0.58, 0.40, 0.74),  # purple - charged ("Q" or "D")
+    "Q": (1.00, 0.50, 0.05),  # orange - charged ("Q" or "D")
     "U": (0.80, 0.80, 0.80),  # light grey - virtual
 }
 
@@ -782,3 +804,55 @@ def _rgb(r, g, b):
 
 def _rgba(r, g, b, a):
     return f"rgba({int(r*255)},{int(g*255)},{int(b*255)},{a})"
+
+
+def _darken(r, g, b, factor=0.6):
+    """
+    Darken an (r, g, b) color for use as a bead outline. Pale category
+    colors (e.g. "U") would otherwise get an equally pale stroke, making
+    the bead look faded; darkening keeps the outline color-coordinated
+    with the bead while staying clearly visible against a white background.
+    """
+    return (r * factor, g * factor, b * factor)
+
+
+def _capsule_path(p1, p2, r):
+    """
+    Build a closed SVG sub-path string for a rounded "capsule" (stadium)
+    shape: a thick line from ``p1`` to ``p2`` with half-width ``r``,
+    capped by semicircles at both ends.
+
+    Used instead of a plain stroked line for connected-mode bead shading:
+    a stroked line has no region separate from its stroke, so a
+    translucent fill would blend against whatever is drawn underneath it
+    (e.g. an outline pass) rather than the true background. A closed
+    shape has a proper non-overlapping fill (interior) and stroke
+    (boundary), exactly like a circle, so the underlying AA structure
+    shows through the translucent fill and the outline stays crisp.
+    """
+    (x1, y1), (x2, y2) = p1, p2
+    dx, dy = x2 - x1, y2 - y1
+    length = math.hypot(dx, dy)
+    if length < 1e-9:
+        return (f'M {x1 - r:.2f},{y1:.2f} '
+                f'A {r:.2f},{r:.2f} 0 1,0 {x1 + r:.2f},{y1:.2f} '
+                f'A {r:.2f},{r:.2f} 0 1,0 {x1 - r:.2f},{y1:.2f} Z')
+
+    ux, uy = dx / length, dy / length
+    nx, ny = -uy, ux  # unit normal, perpendicular to the line
+
+    a1 = (x1 + nx * r, y1 + ny * r)
+    a2 = (x2 + nx * r, y2 + ny * r)
+    b2 = (x2 - nx * r, y2 - ny * r)
+    b1 = (x1 - nx * r, y1 - ny * r)
+
+    # sweep-flag=0: arcs bulge outward (away from the line), giving a
+    # convex rounded cap. The flipped (=1) value curves inward instead,
+    # producing a concave notch at each end.
+    return (
+        f'M {a1[0]:.2f},{a1[1]:.2f} '
+        f'L {a2[0]:.2f},{a2[1]:.2f} '
+        f'A {r:.2f},{r:.2f} 0 1,0 {b2[0]:.2f},{b2[1]:.2f} '
+        f'L {b1[0]:.2f},{b1[1]:.2f} '
+        f'A {r:.2f},{r:.2f} 0 1,0 {a1[0]:.2f},{a1[1]:.2f} Z'
+    )
