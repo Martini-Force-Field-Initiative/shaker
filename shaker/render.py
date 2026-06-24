@@ -162,7 +162,7 @@ def render_connely_surface(SASA_folder='./SASA', aa_subfolder='AA',
     return view
 
 
-def render_ensemble(gro, xtc, sel="all", step=None, n_frames=None, size="400px"):
+def render_ensemble(gro, xtc, sel="all", render_sel="all", step=None, n_frames=None, size="400px"):
     """
     Visualize an aligned ensemble of trajectory frames simultaneously.
 
@@ -174,6 +174,12 @@ def render_ensemble(gro, xtc, sel="all", step=None, n_frames=None, size="400px")
         Trajectory file (e.g. XTC).
     sel : str, optional
         Atom selection used for alignment and centering.
+        Default is ``"all"``.
+    render_sel : str, optional
+        Atom selection of what to actually display (e.g. to exclude
+        solvent/ions or show only a fragment), independent of ``sel``.
+        Centering still uses ``sel``'s center of mass, so the rendered
+        subset stays aligned to the same reference point across frames.
         Default is ``"all"``.
     step : int, optional
         Show every ``step`` frames.
@@ -196,7 +202,8 @@ def render_ensemble(gro, xtc, sel="all", step=None, n_frames=None, size="400px")
 
     align.AlignTraj(u, ref, select=sel, in_memory=True).run()
 
-    ag = u.select_atoms(sel)
+    ag        = u.select_atoms(sel)
+    render_ag = u.select_atoms(render_sel)
 
     if step is None and n_frames is None:
         step = max(len(u.trajectory) // 20, 1)
@@ -211,10 +218,10 @@ def render_ensemble(gro, xtc, sel="all", step=None, n_frames=None, size="400px")
     for i in frame_idx:
         u.trajectory[i]
 
-        coords = u.atoms.positions.copy()
+        coords = render_ag.positions.copy()
         coords -= ag.center_of_mass()
 
-        snap = md.Merge(u.atoms)
+        snap = md.Merge(render_ag)
         snap.atoms.positions = coords
 
         comp = view.add_trajectory(snap)
