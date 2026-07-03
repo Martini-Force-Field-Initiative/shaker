@@ -7,6 +7,8 @@ from shaker.helper import (
     _bead_sizes_dict,
     _bead_masses_dict,
     _BEAD_RATIOS,
+    _valid_martini_bead_types,
+    _validate_bead_types,
 )
 
 
@@ -83,3 +85,27 @@ class TestBeadRatios:
         """Regular > Small > Tiny in radius."""
         assert _bead_sizes_dict["R"] > _bead_sizes_dict["S"]
         assert _bead_sizes_dict["S"] > _bead_sizes_dict["T"]
+
+
+class TestValidMartiniBeadTypes:
+    def test_known_types_present(self):
+        assert {"SC3", "TC4", "P4", "W"} <= _valid_martini_bead_types()
+
+    def test_bogus_type_absent(self):
+        assert "ZZZZ" not in _valid_martini_bead_types()
+
+
+class TestValidateBeadTypes:
+    def test_valid_type_passes(self):
+        _validate_bead_types({"B1": {"type": "SC3"}})
+
+    def test_missing_type_passes_by_default(self):
+        _validate_bead_types({"B1": {"atoms": ["C1"]}})
+
+    def test_invalid_type_raises(self):
+        with pytest.raises(ValueError, match="not a recognized Martini"):
+            _validate_bead_types({"B1": {"type": "ZZZZ"}})
+
+    def test_missing_type_raises_when_required(self):
+        with pytest.raises(ValueError, match="no 'type' defined"):
+            _validate_bead_types({"B1": {"atoms": ["C1"]}}, require_type=True)

@@ -11,6 +11,8 @@ build/
 .pytest_cache/
 .git/
 .claude/
+#vscode settings
+settings.json
 
 # Sphinx documentation
 docs/build/

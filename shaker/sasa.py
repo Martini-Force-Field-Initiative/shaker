@@ -5,7 +5,7 @@ import warnings
 from importlib.resources import files
 import os 
 import subprocess
-from .helper import _bead_sizes_dict, _size_from_name
+from .helper import _bead_sizes_dict, _size_from_name, _validate_bead_types
 from pathlib import Path
 
 
@@ -78,7 +78,9 @@ def run_SASA(name,
             raise ValueError("When isCG=True, a mapping dictionary must be provided.")
         if resname not in mapping:
             raise ValueError(f"No mapping found for resname '{resname}'")
-    
+
+        _validate_bead_types(mapping[resname], require_type=True)
+
         bead_names = list(mapping[resname].keys())
         bead_types = [bead["type"] for bead in mapping[resname].values()]
         bead_sizes = _size_from_name(bead_types)

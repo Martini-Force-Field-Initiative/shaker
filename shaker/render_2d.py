@@ -302,7 +302,6 @@ def _load_mols(pdb_file, resname, net_charge):
             f"in {pdb_file}, found {len(res_ids)}")
 
     molH, cap_indices = _isolate_residue(molH_full, target_idx)
-
     rdDetermineBonds.DetermineBonds(molH, charge=net_charge)
     Chem.SanitizeMol(molH)
 
@@ -496,45 +495,65 @@ def _halo_text(x, y, text, font_size, anchor, fill_color, outline_color,
 
 def _avoid_label_collisions(label_specs, font_size, min_gap=2.0):
     """
-    Nudge label y-positions downward to reduce overlap between bead labels.
+    Nudge label y-positions to reduce overlap between bead labels.
 
-    Processes labels in their original (bead) order and pushes each one
-    down past any already-placed label whose approximate bounding box it
-    would otherwise overlap. Bounding boxes reuse each spec's ``"width"``
-    and ``"height"`` (the same estimates already used for the initial
-    canvas-edge placement; ``"height"`` covers both lines when a bead
-    type subtitle is shown), so this is a cheap heuristic, not an exact
-    layout solver — it breaks up the common case of directly overlapping
-    labels on adjacent beads, not every possible collision.
+    Processes labels in their original (bead) order and places each one at
+    the closest non-overlapping y-position to its preferred baseline,
+    trying offsets in the order 0, +step, -step, +2*step, -2*step, ... .
+    This keeps labels from drifting too far from their beads when labels
+    are taller (e.g. when ``show_bead_type=True`` adds a second line).
+
+    Bounding boxes reuse each spec's ``"width"`` and ``"height"`` (the same
+    estimates already used for the initial canvas-edge placement;
+    ``"height"`` covers both lines when a bead type subtitle is shown), so
+    this is a cheap heuristic, not an exact layout solver.
 
     ``label_specs`` is modified in place: each dict's ``"ty"`` may be
     increased.
     """
     placed = []  # (x_min, x_max, y_min, y_max) of already-placed labels
 
-    for spec in label_specs:
-        width  = spec["width"]
+    def _box_for(spec, ty):
+        width = spec["width"]
         height = spec.get("height", font_size * 1.2)
         if spec["anchor"] == "start":
             x_min, x_max = spec["tx"], spec["tx"] + width
         else:
             x_min, x_max = spec["tx"] - width, spec["tx"]
-
-        ty = spec["ty"]
-        moved = True
-        while moved:
-            moved = False
-            y_min = ty - font_size * 0.6
-            y_max = y_min + height
-            for px_min, px_max, py_min, py_max in placed:
-                if x_min < px_max and x_max > px_min and y_min < py_max and y_max > py_min:
-                    ty += height + min_gap
-                    moved = True
-                    break
-
-        spec["ty"] = ty
         y_min = ty - font_size * 0.6
-        placed.append((x_min, x_max, y_min, y_min + height))
+        y_max = y_min + height
+        return x_min, x_max, y_min, y_max
+
+    def _overlaps_any(box):
+        x_min, x_max, y_min, y_max = box
+        for px_min, px_max, py_min, py_max in placed:
+            if x_min < px_max and x_max > px_min and y_min < py_max and y_max > py_min:
+                return True
+        return False
+
+    for spec in label_specs:
+        pref_ty = spec["ty"]
+        height = spec.get("height", font_size * 1.2)
+        step = max(height + min_gap, font_size * 0.8)
+
+        # Try nearest offsets first to keep each label close to its bead.
+        chosen_ty = pref_ty
+        max_tries = 80
+        for i in range(max_tries):
+            if i == 0:
+                cand = pref_ty
+            else:
+                k = (i + 1) // 2
+                sign = 1 if i % 2 == 1 else -1
+                cand = pref_ty + sign * k * step
+
+            box = _box_for(spec, cand)
+            if not _overlaps_any(box):
+                chosen_ty = cand
+                break
+
+        spec["ty"] = chosen_ty
+        placed.append(_box_for(spec, chosen_ty))
 
 
 def _palette(n):
