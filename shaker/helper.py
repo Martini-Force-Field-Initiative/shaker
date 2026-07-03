@@ -46,6 +46,22 @@ def _bead_mass_from_type(bead_type):
         return _bead_masses_dict["T"]
     return _bead_masses_dict["R"]
 
+def _category_from_type(bead_type):
+    '''
+    Return the Martini chemical-category letter (e.g. C, P, N, X, Q, D, W)
+    for a bead type string, stripping the optional small/tiny size prefix
+    ('S'/'T') and any trailing polarity/H-bonding suffix letters. 'U'
+    (virtual) has no size-prefixed variants and is returned as-is.
+    '''
+    if not bead_type:
+        return ''
+    t = bead_type[0].upper()
+    if t == 'U':
+        return 'U'
+    if t in ('S', 'T') and len(bead_type) > 1:
+        t = bead_type[1].upper()
+    return t
+
 
 @lru_cache(maxsize=1)
 def _valid_martini_bead_types():
