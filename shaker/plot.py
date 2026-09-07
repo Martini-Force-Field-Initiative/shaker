@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib as mpl
 import matplotlib.patches as mpatches
-import matplotlib.lines as mlines
 import warnings
 from scipy.stats import wasserstein_distance
 
@@ -146,11 +145,10 @@ def plot_sasa_dir(root="./SASA",
                 mpatches.Patch(facecolor=color, alpha=0.4,
                                edgecolor="none", label=label))
 
+        # The dashed line's meaning is self-evident (it sits on the AA
+        # bar/violin), so it doesn't get its own legend entry.
         ax.axhline(aa_val, color="dimgrey", lw=1.2,
                    ls="--", zorder=1, alpha=0.7)
-        legend_patches.insert(0,
-            mlines.Line2D([], [], color="dimgrey", lw=1.2,
-                          ls="--", alpha=0.7, label="AA reference"))
 
     if kind == "bar":
         ax.bar(x, vals,
