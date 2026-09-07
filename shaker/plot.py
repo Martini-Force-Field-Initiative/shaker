@@ -21,8 +21,7 @@ except AttributeError:
 
 def plot_sasa_dir(root="./SASA",
                   xvg="SASA.xvg",
-                  kind="bar",
-                  metrics=True):
+                  kind="bar"):
     '''
     Plot SASA values from multiple simulations stored in subdirectories.
 
@@ -40,9 +39,7 @@ def plot_sasa_dir(root="./SASA",
     - "violin" — same layout as "bar", but each column is a violin showing
       the full per-frame spread instead of just mean ± std.
     - "overlay" — per-frame SASA distributions overlaid as density curves
-      (same visual style as `plot_bonded_distributions`), with Wasserstein
-      distance and overlap coefficient reported against the "AA"
-      subdirectory if present.
+      (same visual style as `plot_bonded_distributions`).
 
     If a subdirectory named "AA" is present, coloured background bands are
     drawn to indicate the percentage deviation from the AA reference value:
@@ -60,9 +57,6 @@ def plot_sasa_dir(root="./SASA",
         each subdirectory. Default is "SASA.xvg".
     kind : {"bar", "violin", "overlay"}, optional
         Chart style, see above. Default is "bar".
-    metrics : bool, optional
-        "overlay" only: if True (default), annotate each comparison curve
-        with its Wasserstein distance and overlap coefficient against "AA".
 
     Returns
     -------
@@ -87,7 +81,7 @@ def plot_sasa_dir(root="./SASA",
     root = Path(root)
 
     if kind == "overlay":
-        return _plot_sasa_overlay(root, xvg, metrics=metrics)
+        return _plot_sasa_overlay(root, xvg)
 
     entries = [(d.name, _read_SASA_timeseries(d / xvg))
               for d in sorted(root.iterdir())
@@ -192,7 +186,12 @@ def plot_sasa_dir(root="./SASA",
     return fig, ax, items
 
 
-def _plot_sasa_overlay(root, xvg, metrics=True, bins=60):
+_SASA_OVERLAY_COLORS = ["tab:blue", "tab:red", "tab:green", "tab:orange",
+                        "tab:purple", "tab:brown", "tab:pink", "tab:gray",
+                        "tab:olive", "tab:cyan"]
+
+
+def _plot_sasa_overlay(root, xvg, bins=60):
     '''
     Plot per-frame SASA distributions for every subdirectory in `root` as
     overlaid density curves, in the same visual style as
@@ -213,12 +212,15 @@ def _plot_sasa_overlay(root, xvg, metrics=True, bins=60):
     hists = {name: np.histogram(vals, bins=bin_edges, density=True)[0]
              for name, vals in entries}
 
-    prop_cycle_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-    colors = {name: prop_cycle_colors[i % len(prop_cycle_colors)]
-             for i, name in enumerate(names)}
-
     ref_name = "AA" if "AA" in hists else names[0]
     ref_hist = hists[ref_name]
+
+    # Reference (AA, if present) always gets tab:blue and the first
+    # comparison dataset tab:red, matching plot_bonded_distributions'
+    # convention, rather than whatever order subdirectories sort in.
+    plot_order = [ref_name] + [n for n in names if n != ref_name]
+    colors = {name: _SASA_OVERLAY_COLORS[i % len(_SASA_OVERLAY_COLORS)]
+             for i, name in enumerate(plot_order)}
 
     # x-axis limits: default to mean ± 12.5 % around the reference (AA, or
     # the first dataset if there's no AA), widened to the actual data range
@@ -263,56 +265,23 @@ def _plot_sasa_overlay(root, xvg, metrics=True, bins=60):
             mlines.Line2D([], [], color="dimgrey", lw=1.2,
                           ls="--", alpha=0.7, label="AA reference"))
 
-    ax.plot(bin_centers, ref_hist, label=ref_name, color=colors[ref_name], zorder=2)
+    curve_handles = ax.plot(bin_centers, ref_hist, label=ref_name,
+                            color=colors[ref_name], zorder=2)
 
-    metrics_lines = []
     for name in names:
         if name == ref_name:
             continue
         hist, color = hists[name], colors[name]
-        ax.plot(bin_centers, hist, label=name, color=color, zorder=2)
-
-        if metrics:
-            overlap_y = np.minimum(ref_hist, hist)
-            ax.fill_between(bin_centers, overlap_y, alpha=0.15, color=color, zorder=1)
-
-            w_dist = wasserstein_distance(bin_centers, bin_centers, ref_hist, hist)
-            oc = _trapz(overlap_y, bin_centers)
-            if oc >= 0.8:
-                line_color, status = "green", "[GOOD]"
-            elif oc >= 0.65:
-                line_color, status = "orange", "[WARN]"
-            else:
-                line_color, status = "red", "[POOR]"
-            metrics_lines.append(
-                (f"{name}  W={w_dist:.3f}  OC={oc:.3f}  {status}", line_color))
-
-    if metrics and metrics_lines:
-        line_height = 0.10
-        for k, (line, line_color) in enumerate(metrics_lines):
-            ax.text(
-                0.98, 0.95 - k * line_height,
-                line,
-                transform=ax.transAxes,
-                fontsize=7, fontweight="bold",
-                va="top", ha="right",
-                family="monospace",
-                color=line_color,
-                bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8, lw=0),
-            )
+        curve_handles += ax.plot(bin_centers, hist, label=name, color=color, zorder=2)
 
     ax.set_xlim(x_min, x_max)
     ax.set_xlabel("SASA (nm$^2$)", fontweight="bold")
-    ax.set_ylabel("Prob. density")
+    ax.set_ylabel("Prob. density", fontweight="bold")
 
-    dataset_legend = ax.legend(loc="upper left", fontsize=8, ncols=1,
-                               labelspacing=0.3, frameon=True, fancybox=True,
-                               edgecolor="none", facecolor="white", framealpha=0.8)
-    if legend_patches:
-        ax.add_artist(dataset_legend)
-        ax.legend(handles=legend_patches, loc="lower left", fontsize=8,
-                 labelspacing=0.3, frameon=True, fancybox=True,
-                 edgecolor="none", facecolor="white", framealpha=0.8)
+    ax.legend(handles=curve_handles + legend_patches,
+             loc="upper left", fontsize=8, ncols=1, labelspacing=0.3,
+             frameon=True, fancybox=True, edgecolor="none",
+             facecolor="white", framealpha=0.8)
 
     fig.savefig("SASABar.png", dpi=300, transparent=True, bbox_inches="tight")
 
