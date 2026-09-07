@@ -44,11 +44,11 @@ def plot_sasa_dir(root="./SASA",
       distance and overlap coefficient reported against the "AA"
       subdirectory if present.
 
-    For "bar" and "violin", if a subdirectory named "AA" is present,
-    coloured background bands are drawn to indicate the percentage deviation
-    from the AA reference value: green (0-5 %), orange (5-10 %), and red
-    (>10 %, extending to zero). A dashed horizontal line marks the AA
-    reference value.
+    If a subdirectory named "AA" is present, coloured background bands are
+    drawn to indicate the percentage deviation from the AA reference value:
+    green (0-5 %), orange (5-10 %), and red (>10 %). A dashed line marks the
+    AA reference value. For "bar"/"violin" these are horizontal (SASA is the
+    y-axis); for "overlay" they're vertical (SASA is the x-axis there).
 
     Parameters
     ----------
@@ -106,14 +106,28 @@ def plot_sasa_dir(root="./SASA",
         figsize=(max(6, 0.8 * len(names)), 4),
         tight_layout=True)
 
-    # y-axis limits
-    y_max = max(v + e for v, e in zip(vals, errs))
-    ax.set_ylim(0, y_max * 1.10)
-
-    # AA reference bands
+    # AA reference value, used both for the deviation bands below and (for
+    # "violin") as the center of the y-axis window.
     aa_val = None
     if "AA" in names:
         aa_val = vals[names.index("AA")]
+
+    # y-axis limits: bars start from zero so the eye can compare magnitude.
+    # A violin has no such baseline — default to mean ± 12.5 % around the
+    # AA reference (a little past the outermost ">10 %" deviation band),
+    # but widen to the actual data range if any distribution extends
+    # beyond that window, so nothing gets clipped.
+    if kind == "violin":
+        ref_mean = aa_val if aa_val is not None else float(np.mean(vals))
+        window = ref_mean * 0.125
+        dist_min = min(dist.min() for dist in distributions)
+        dist_max = max(dist.max() for dist in distributions)
+        y_min = min(ref_mean - window, dist_min)
+        y_top = max(ref_mean + window, dist_max)
+    else:
+        y_min = 0
+        y_top = max(v + e for v, e in zip(vals, errs)) * 1.10
+    ax.set_ylim(y_min, y_top)
 
     legend_patches = []
     if aa_val is not None:
@@ -124,9 +138,9 @@ def plot_sasa_dir(root="./SASA",
         ]
         for lo, hi, color, label in bands:
             if hi is None:
-                ax.axhspan(0, aa_val * (1 - lo),
+                ax.axhspan(y_min, aa_val * (1 - lo),
                            color=color, alpha=0.15, zorder=0)
-                ax.axhspan(aa_val * (1 + lo), y_max * 1.10,
+                ax.axhspan(aa_val * (1 + lo), y_top,
                            color=color, alpha=0.15, zorder=0)
             else:
                 ax.axhspan(aa_val * (1 - hi), aa_val * (1 - lo),
@@ -191,6 +205,7 @@ def _plot_sasa_overlay(root, xvg, metrics=True, bins=60):
         raise ValueError(f"No '{xvg}' files found under {root}")
 
     names = [name for name, _ in entries]
+    means = {name: vals.mean() for name, vals in entries}
     all_vals = np.concatenate([vals for _, vals in entries])
     bin_edges = np.linspace(all_vals.min(), all_vals.max(), bins + 1)
     bin_centers = (bin_edges[1:] + bin_edges[:-1]) / 2
@@ -205,19 +220,61 @@ def _plot_sasa_overlay(root, xvg, metrics=True, bins=60):
     ref_name = "AA" if "AA" in hists else names[0]
     ref_hist = hists[ref_name]
 
+    # x-axis limits: default to mean ± 12.5 % around the reference (AA, or
+    # the first dataset if there's no AA), widened to the actual data range
+    # if any distribution extends beyond that window, so nothing is clipped.
+    ref_mean = means[ref_name]
+    window = ref_mean * 0.125
+    x_min = min(ref_mean - window, all_vals.min())
+    x_max = max(ref_mean + window, all_vals.max())
+
     fig, ax = plt.subplots(figsize=(6, 4), tight_layout=True)
-    ax.plot(bin_centers, ref_hist, label=ref_name, color=colors[ref_name])
+
+    # AA reference bands, same deviation thresholds as plot_sasa_dir's
+    # bar/violin charts, just as vertical spans since SASA is the x-axis
+    # here instead of the y-axis.
+    aa_val = means.get("AA")
+    legend_patches = []
+    if aa_val is not None:
+        bands = [
+            (0.00, 0.05, "#2ecc71", "0–5 % from AA"),
+            (0.05, 0.10, "#e67e22", "5–10 % from AA"),
+            (0.10, None, "#e74c3c", ">10 % from AA"),
+        ]
+        for lo, hi, color, label in bands:
+            if hi is None:
+                ax.axvspan(x_min, aa_val * (1 - lo),
+                          color=color, alpha=0.15, zorder=0)
+                ax.axvspan(aa_val * (1 + lo), x_max,
+                          color=color, alpha=0.15, zorder=0)
+            else:
+                ax.axvspan(aa_val * (1 - hi), aa_val * (1 - lo),
+                          color=color, alpha=0.15, zorder=0)
+                ax.axvspan(aa_val * (1 + lo), aa_val * (1 + hi),
+                          color=color, alpha=0.15, zorder=0)
+
+            legend_patches.append(
+                mpatches.Patch(facecolor=color, alpha=0.4,
+                               edgecolor="none", label=label))
+
+        ax.axvline(aa_val, color="dimgrey", lw=1.2,
+                  ls="--", zorder=1, alpha=0.7)
+        legend_patches.insert(0,
+            mlines.Line2D([], [], color="dimgrey", lw=1.2,
+                          ls="--", alpha=0.7, label="AA reference"))
+
+    ax.plot(bin_centers, ref_hist, label=ref_name, color=colors[ref_name], zorder=2)
 
     metrics_lines = []
     for name in names:
         if name == ref_name:
             continue
         hist, color = hists[name], colors[name]
-        ax.plot(bin_centers, hist, label=name, color=color)
+        ax.plot(bin_centers, hist, label=name, color=color, zorder=2)
 
         if metrics:
             overlap_y = np.minimum(ref_hist, hist)
-            ax.fill_between(bin_centers, overlap_y, alpha=0.15, color=color)
+            ax.fill_between(bin_centers, overlap_y, alpha=0.15, color=color, zorder=1)
 
             w_dist = wasserstein_distance(bin_centers, bin_centers, ref_hist, hist)
             oc = _trapz(overlap_y, bin_centers)
@@ -244,15 +301,22 @@ def _plot_sasa_overlay(root, xvg, metrics=True, bins=60):
                 bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8, lw=0),
             )
 
+    ax.set_xlim(x_min, x_max)
     ax.set_xlabel("SASA (nm$^2$)", fontweight="bold")
     ax.set_ylabel("Prob. density")
-    ax.legend(loc="upper left", fontsize=8, ncols=1, labelspacing=0.3,
-             frameon=True, fancybox=True, edgecolor="none",
-             facecolor="white", framealpha=0.8)
+
+    dataset_legend = ax.legend(loc="upper left", fontsize=8, ncols=1,
+                               labelspacing=0.3, frameon=True, fancybox=True,
+                               edgecolor="none", facecolor="white", framealpha=0.8)
+    if legend_patches:
+        ax.add_artist(dataset_legend)
+        ax.legend(handles=legend_patches, loc="lower left", fontsize=8,
+                 labelspacing=0.3, frameon=True, fancybox=True,
+                 edgecolor="none", facecolor="white", framealpha=0.8)
 
     fig.savefig("SASABar.png", dpi=300, transparent=True, bbox_inches="tight")
 
-    items = [(name, float(vals.mean()), float(vals.std())) for name, vals in entries]
+    items = [(name, float(means[name]), float(vals.std())) for name, vals in entries]
     return fig, ax, items
 
 
