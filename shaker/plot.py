@@ -348,12 +348,13 @@ def plot_bonded_distributions(*bonded_dicts,
                 if metrics:
                     overlap_y = np.minimum(ref_hist, hist)
 
-                    # Shade the overlapping region
+                    # Shade the overlapping region (kept out of the legend —
+                    # it's visually self-evident, and an entry per comparison
+                    # dataset would make the legend grow unboundedly).
                     ax.fill_between(
                         ref_bins, overlap_y,
                         alpha=0.15,
                         color=color,
-                        label=f"Overlap {labels[0]}∩{label}",
                     )
 
                     # Wasserstein distance
@@ -387,8 +388,7 @@ def plot_bonded_distributions(*bonded_dicts,
                         va="top", ha="right",
                         family="monospace",
                         color=line_color,
-                        bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.6, lw=0)
-                              if k == 0 else None,
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8, lw=0),
                     )
 
             # --- axis limits ---
@@ -399,7 +399,7 @@ def plot_bonded_distributions(*bonded_dicts,
             ax.set_xlim(xlim_map[cat])
 
             ax.set_title("-".join(distribution), fontweight="bold")
-            ax.legend(loc="upper left", frameon=False, fontsize=5, ncols=2)
+            ax.legend(loc="upper left", frameon=False, fontsize=5, ncols=1)
             ax.set_xlabel(config[cat]["xlabel"], fontsize=9)
             ax.set_ylabel("Prob. density")
 

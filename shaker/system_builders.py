@@ -253,10 +253,10 @@ def list_iterations(run_dir):
     '''
     List checkpointed simulation iterations in a run directory.
 
-    Iterations are created automatically by `runSim` (when `checkpoint=True`)
-    as `iter_<N>_<timestamp>` folders, each containing the cleaned trajectory
-    from that run (`pbc.pdb`/`pbc.xtc`), any `.itp` file(s) simulated, and
-    `mapping.json` if a mapping was provided to `runSim`.
+    Iterations are created automatically by `runSim` (when `keep_last` is
+    not None) as `iter_<N>_<timestamp>` folders, each containing the cleaned
+    trajectory from that run (`pbc.pdb`/`pbc.xtc`), any `.itp` file(s)
+    simulated, and `mapping.json` if a mapping was provided to `runSim`.
 
     Parameters
     ----------
