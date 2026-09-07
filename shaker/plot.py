@@ -21,7 +21,7 @@ except AttributeError:
 
 def plot_sasa_dir(root="./SASA",
                   xvg="SASA.xvg",
-                  kind="bar"):
+                  kind="violin"):
     '''
     Plot SASA values from multiple simulations stored in subdirectories.
 
@@ -35,9 +35,9 @@ def plot_sasa_dir(root="./SASA",
 
     Three chart styles are available via `kind`:
 
-    - "bar" (default) — mean ± std as a bar per subdirectory.
-    - "violin" — same layout as "bar", but each column is a violin showing
-      the full per-frame spread instead of just mean ± std.
+    - "bar" — mean ± std as a bar per subdirectory.
+    - "violin" (default) — same layout as "bar", but each column is a
+      violin showing the full per-frame spread instead of just mean ± std.
     - "overlay" — per-frame SASA distributions overlaid as density curves
       (same visual style as `plot_bonded_distributions`).
 
@@ -56,7 +56,7 @@ def plot_sasa_dir(root="./SASA",
         Name of the per-frame GROMACS `.xvg` file (`gmx sasa -o`) within
         each subdirectory. Default is "SASA.xvg".
     kind : {"bar", "violin", "overlay"}, optional
-        Chart style, see above. Default is "bar".
+        Chart style, see above. Default is "violin".
 
     Returns
     -------
@@ -269,11 +269,10 @@ def _plot_sasa_overlay(root, xvg, bins=60):
                 mpatches.Patch(facecolor=color, alpha=0.4,
                                edgecolor="none", label=label))
 
+        # The dashed line's meaning is self-evident (it sits on the AA
+        # curve), so it doesn't get its own legend entry.
         ax.axvline(aa_val, color="dimgrey", lw=1.2,
                   ls="--", zorder=1, alpha=0.7)
-        legend_patches.insert(0,
-            mlines.Line2D([], [], color="dimgrey", lw=1.2,
-                          ls="--", alpha=0.7, label="AA reference"))
 
     curve_handles = ax.plot(bin_centers, ref_hist, label=ref_name,
                             color=colors[ref_name], zorder=2)
@@ -289,8 +288,8 @@ def _plot_sasa_overlay(root, xvg, bins=60):
     ax.set_ylabel("Prob. density", fontweight="bold")
 
     ax.legend(handles=curve_handles + legend_patches,
-             loc="upper left", fontsize=8, ncols=1, labelspacing=0.3,
-             frameon=True, fancybox=True, edgecolor="none",
+             loc="upper left", fontsize=8, ncols=2, labelspacing=0.3,
+             columnspacing=1.0, frameon=True, fancybox=True, edgecolor="none",
              facecolor="white", framealpha=0.8)
 
     fig.savefig("SASABar.png", dpi=300, transparent=True, bbox_inches="tight")
