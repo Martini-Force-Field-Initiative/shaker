@@ -378,7 +378,7 @@ def plot_bonded_distributions(*bonded_dicts,
             # Annotate metrics in the upper-right corner, one text call per line
             # so each comparison carries its own colour.
             if metrics and metrics_lines:
-                line_height = 0.08
+                line_height = 0.10
                 for k, (line, line_color) in enumerate(metrics_lines):
                     ax.text(
                         0.98, 0.95 - k * line_height,
@@ -399,7 +399,9 @@ def plot_bonded_distributions(*bonded_dicts,
             ax.set_xlim(xlim_map[cat])
 
             ax.set_title("-".join(distribution), fontweight="bold")
-            ax.legend(loc="upper left", frameon=False, fontsize=5, ncols=1)
+            ax.legend(loc="upper left", fontsize=5, ncols=1, labelspacing=0.3,
+                     frameon=True, fancybox=True, edgecolor="none",
+                     facecolor="white", framealpha=0.8)
             ax.set_xlabel(config[cat]["xlabel"], fontsize=9)
             ax.set_ylabel("Prob. density")
 
