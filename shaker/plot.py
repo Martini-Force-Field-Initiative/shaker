@@ -27,24 +27,23 @@ def plot_sasa_dir(root="./SASA",
     This function scans the specified directory for subdirectories
     containing a per-frame SASA time series (`xvg`, written by `run_SASA`
     via `gmx sasa -o`). Each subdirectory is assumed to represent a
-    different model or simulation condition. Mean and std (used for "bar"
-    and the returned summary values) are computed from this same per-frame
-    data for every `kind`, so all three chart styles — and the numbers
-    returned alongside them — are derived the same way.
+    different model or simulation condition. Mean and std (used for the
+    returned summary values) are computed from this same per-frame data
+    for every `kind`, so both chart styles — and the numbers returned
+    alongside them — are derived the same way.
 
-    Three chart styles are available via `kind`:
+    Two chart styles are available via `kind`:
 
-    - "bar" — mean ± std as a bar per subdirectory.
-    - "violin" (default) — same layout as "bar", but each column is a
-      violin showing the full per-frame spread instead of just mean ± std.
+    - "violin" (default) — a violin per subdirectory, showing the full
+      per-frame spread rather than just mean ± std.
     - "overlay" — per-frame SASA distributions overlaid as density curves
       (same visual style as `plot_bonded_distributions`).
 
     If a subdirectory named "AA" is present, coloured background bands are
     drawn to indicate the percentage deviation from the AA reference value:
     green (0-5 %), orange (5-10 %), and red (>10 %). A dashed line marks the
-    AA reference value. For "bar"/"violin" these are horizontal (SASA is the
-    y-axis); for "overlay" they're vertical (SASA is the x-axis there).
+    AA reference value. For "violin" this is horizontal (SASA is the
+    y-axis); for "overlay" it's vertical (SASA is the x-axis there).
 
     Parameters
     ----------
@@ -54,7 +53,7 @@ def plot_sasa_dir(root="./SASA",
     xvg : str, optional
         Name of the per-frame GROMACS `.xvg` file (`gmx sasa -o`) within
         each subdirectory. Default is "SASA.xvg".
-    kind : {"bar", "violin", "overlay"}, optional
+    kind : {"violin", "overlay"}, optional
         Chart style, see above. Default is "violin".
 
     Returns
@@ -69,19 +68,23 @@ def plot_sasa_dir(root="./SASA",
 
     Notes
     -----
-    The y-axis for "bar"/"violin" runs from 0 to 10 % above the largest
-    value (+ error, for "bar") across all datasets.
-
     The resulting figure is saved as `SASABar.png`.
     '''
-    if kind not in ("bar", "violin", "overlay"):
-        raise ValueError("kind must be 'bar', 'violin', or 'overlay'")
+    if kind not in ("violin", "overlay"):
+        raise ValueError("kind must be 'violin' or 'overlay'")
 
     root = Path(root)
 
     if kind == "overlay":
         return _plot_sasa_overlay(root, xvg)
+    return _plot_sasa_violin(root, xvg)
 
+
+def _plot_sasa_violin(root, xvg):
+    '''
+    Plot SASA as a violin chart, one column per subdirectory in `root`.
+    See `plot_sasa_dir` (kind="violin").
+    '''
     entries = [(d.name, _read_SASA_timeseries(d / xvg))
               for d in sorted(root.iterdir())
               if d.is_dir() and (d / xvg).exists()]
@@ -99,27 +102,22 @@ def plot_sasa_dir(root="./SASA",
         figsize=(max(6, 0.8 * len(names)), 4),
         tight_layout=True)
 
-    # AA reference value, used both for the deviation bands below and (for
-    # "violin") as the center of the y-axis window.
+    # AA reference value, used both for the deviation bands below and as
+    # the center of the y-axis window.
     aa_val = None
     if "AA" in names:
         aa_val = vals[names.index("AA")]
 
-    # y-axis limits: bars start from zero so the eye can compare magnitude.
-    # A violin has no such baseline — default to mean ± 12.5 % around the
-    # AA reference (a little past the outermost ">10 %" deviation band),
-    # but widen to the actual data range if any distribution extends
-    # beyond that window, so nothing gets clipped.
-    if kind == "violin":
-        ref_mean = aa_val if aa_val is not None else float(np.mean(vals))
-        window = ref_mean * 0.125
-        dist_min = min(dist.min() for dist in distributions)
-        dist_max = max(dist.max() for dist in distributions)
-        y_min = min(ref_mean - window, dist_min)
-        y_top = max(ref_mean + window, dist_max)
-    else:
-        y_min = 0
-        y_top = max(v + e for v, e in zip(vals, errs)) * 1.10
+    # y-axis limits: default to mean ± 12.5 % around the AA reference (a
+    # little past the outermost ">10 %" deviation band), but widen to the
+    # actual data range if any distribution extends beyond that window,
+    # so nothing gets clipped.
+    ref_mean = aa_val if aa_val is not None else float(np.mean(vals))
+    window = ref_mean * 0.125
+    dist_min = min(dist.min() for dist in distributions)
+    dist_max = max(dist.max() for dist in distributions)
+    y_min = min(ref_mean - window, dist_min)
+    y_top = max(ref_mean + window, dist_max)
     ax.set_ylim(y_min, y_top)
 
     legend_patches = []
@@ -146,40 +144,30 @@ def plot_sasa_dir(root="./SASA",
                                edgecolor="none", label=label))
 
         # The dashed line's meaning is self-evident (it sits on the AA
-        # bar/violin), so it doesn't get its own legend entry.
+        # violin), so it doesn't get its own legend entry.
         ax.axhline(aa_val, color="dimgrey", lw=1.2,
                    ls="--", zorder=1, alpha=0.7)
 
-    if kind == "bar":
-        ax.bar(x, vals,
-               yerr=errs,
-               capsize=7,
-               error_kw=dict(elinewidth=1.8, ecolor="dimgrey", capthick=1.8),
-               color="#888888",
-               edgecolor="#bbbbbb",
-               linewidth=1.2,
-               zorder=2)
-    else:  # violin
-        parts = ax.violinplot(distributions, positions=x,
-                              showmeans=True, showextrema=True, widths=0.7)
-        for body in parts["bodies"]:
-            body.set_facecolor("#888888")
-            body.set_edgecolor("#555555")
-            body.set_alpha(0.7)
-            body.set_zorder(2)
-        for key in ("cbars", "cmins", "cmaxes", "cmeans"):
-            parts[key].set_color("dimgrey")
-            parts[key].set_zorder(2)
-        for key in ("cmins", "cmaxes", "cmeans"):
-            # Shrink the mean/min/max horizontal markers to half their
-            # default width (which otherwise spans the full violin) so
-            # they read as tick marks rather than bars.
-            segments = []
-            for (x0, y0), (x1, y1) in parts[key].get_segments():
-                xc = (x0 + x1) / 2
-                half = (x1 - x0) / 4
-                segments.append([(xc - half, y0), (xc + half, y1)])
-            parts[key].set_segments(segments)
+    parts = ax.violinplot(distributions, positions=x,
+                          showmeans=True, showextrema=True, widths=0.7)
+    for body in parts["bodies"]:
+        body.set_facecolor("#888888")
+        body.set_edgecolor("#555555")
+        body.set_alpha(0.7)
+        body.set_zorder(2)
+    for key in ("cbars", "cmins", "cmaxes", "cmeans"):
+        parts[key].set_color("dimgrey")
+        parts[key].set_zorder(2)
+    for key in ("cmins", "cmaxes", "cmeans"):
+        # Shrink the mean/min/max horizontal markers to half their
+        # default width (which otherwise spans the full violin) so
+        # they read as tick marks rather than bars.
+        segments = []
+        for (x0, y0), (x1, y1) in parts[key].get_segments():
+            xc = (x0 + x1) / 2
+            half = (x1 - x0) / 4
+            segments.append([(xc - half, y0), (xc + half, y1)])
+        parts[key].set_segments(segments)
 
     ax.set_xticks(x)
     ax.set_xticklabels(names, rotation=30, ha="right", fontweight="bold")
