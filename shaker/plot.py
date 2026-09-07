@@ -172,6 +172,16 @@ def plot_sasa_dir(root="./SASA",
         for key in ("cbars", "cmins", "cmaxes", "cmeans"):
             parts[key].set_color("dimgrey")
             parts[key].set_zorder(2)
+        for key in ("cmins", "cmaxes", "cmeans"):
+            # Shrink the mean/min/max horizontal markers to half their
+            # default width (which otherwise spans the full violin) so
+            # they read as tick marks rather than bars.
+            segments = []
+            for (x0, y0), (x1, y1) in parts[key].get_segments():
+                xc = (x0 + x1) / 2
+                half = (x1 - x0) / 4
+                segments.append([(xc - half, y0), (xc + half, y1)])
+            parts[key].set_segments(segments)
 
     ax.set_xticks(x)
     ax.set_xticklabels(names, rotation=30, ha="right", fontweight="bold")
