@@ -4,6 +4,7 @@ from collections import Counter
 import math
 from pathlib import Path
 import warnings
+from xml.sax.saxutils import escape as _xml_escape
 
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdDetermineBonds
@@ -153,6 +154,10 @@ def render_2dMapping(pdb_file, resname, mapping,
                 UserWarning, stacklevel=2)
 
         if not weights:
+            warnings.warn(
+                f"Bead '{label}': none of its atoms resolved to a heavy atom, "
+                f"so it will not be drawn.",
+                UserWarning, stacklevel=2)
             continue
 
         sx = sy = sw = 0.0
@@ -163,7 +168,7 @@ def render_2dMapping(pdb_file, resname, mapping,
             sw += wt
         cx, cy = sx / sw, sy / sw
 
-        heavy_names = _bead_heavy_names(bead, hmap, mol, idx)
+        heavy_names = _bead_heavy_names(bead, hmap)
         atom_pts    = {name: draw_coords[name] for name in heavy_names if name in draw_coords}
         edges       = _bead_edges(mol, heavy_names, idx)
 
@@ -201,19 +206,16 @@ def render_2dMapping(pdb_file, resname, mapping,
                 shading_layer.append(f'<path d="{narrow}" fill="{fill}" />')
             else:
                 shading_layer.append(
-                    f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{bead_r:.2f}" '
-                    f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
+                    _circle(cx, cy, bead_r, fill, outline, line_w))
 
         if mode == "atomblobs":
             for x, y in atom_pts.values():
                 shading_layer.append(
-                    f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{conn_r:.2f}" '
-                    f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
+                    _circle(x, y, conn_r, fill, outline, line_w))
 
         if mode in ("circle", "both"):
             shading_layer.append(
-                f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{bead_r:.2f}" '
-                f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
+                _circle(cx, cy, bead_r, fill, outline, line_w))
 
         bead_type = bead_map[label].get("type") if show_bead_type else None
         type_font_size = font_size * 0.7
@@ -222,7 +224,13 @@ def render_2dMapping(pdb_file, resname, mapping,
         label_width  = _text_width(label, font_size)
         type_width   = _text_width(bead_type, type_font_size) if bead_type else 0.0
         width        = max(label_width, type_width)
-        if cx + label_offset + width > w:
+        # Grow the label to the right by default, flipping to the left
+        # only when that would overrun the right edge *and* the flipped
+        # label actually fits — otherwise flipping just moves the overflow
+        # to the other side.
+        overflows_right = cx + label_offset + width > w
+        fits_flipped    = cx - label_offset - width >= 0
+        if overflows_right and fits_flipped:
             tx     = cx - label_offset
             anchor = "end"
         else:
@@ -503,6 +511,12 @@ def _text_width(s, font_size):
     return len(s) * font_size * 0.6
 
 
+def _circle(cx, cy, r, fill, outline, line_w):
+    """One filled, outlined SVG circle — a whole bead, or a single atom blob."""
+    return (f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{r:.2f}" '
+            f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
+
+
 def _halo_text(x, y, text, font_size, anchor, fill_color, outline_color,
                stroke_width, bold=False, italic=False):
     """
@@ -510,12 +524,17 @@ def _halo_text(x, y, text, font_size, anchor, fill_color, outline_color,
     and type subtitle: a white halo pass (so the text stays legible over
     the structure regardless of what's behind it) followed by the
     colored, outlined fill pass.
+
+    Bead names and types come from the user's mapping, so the text is
+    XML-escaped — an unescaped "&" or "<" would otherwise produce an SVG
+    that no parser can read, without anything here failing.
     """
     style = ""
     if bold:
         style += ' font-weight="bold"'
     if italic:
         style += ' font-style="italic"'
+    text = _xml_escape(str(text))
     common = (f'x="{x:.2f}" y="{y:.2f}" font-family="sans-serif" '
               f'font-size="{font_size:.2f}"{style} dominant-baseline="middle" '
               f'text-anchor="{anchor}"')
@@ -564,6 +583,7 @@ def _avoid_label_collisions(label_specs, font_size, min_gap=2.0):
                 return True
         return False
 
+    crowded = []
     for spec in label_specs:
         pref_ty = spec["ty"]
         height = spec.get("height", font_size * 1.2)
@@ -584,9 +604,18 @@ def _avoid_label_collisions(label_specs, font_size, min_gap=2.0):
             if not _overlaps_any(box):
                 chosen_ty = cand
                 break
+        else:
+            crowded.append(spec["label"])
 
         spec["ty"] = chosen_ty
         placed.append(_box_for(spec, chosen_ty))
+
+    if crowded:
+        warnings.warn(
+            f"Could not place {len(crowded)} bead label(s) without overlap "
+            f"({', '.join(crowded)}); they are drawn at their preferred "
+            f"position. A larger canvas or smaller font_size may help.",
+            UserWarning, stacklevel=3)
 
 
 def _palette(n):
@@ -652,10 +681,13 @@ def _bead_colors(bead_map):
     return _palette(len(bead_defs))
 
 
-def _bead_heavy_names(bead, hmap, mol, idx_map):
+def _bead_heavy_names(bead, hmap):
     """
     Unique heavy atoms contributing to a bead, with Hs folded onto their
-    bonded heavy atoms.
+    bonded heavy atoms, in first-seen order.
+
+    Names that don't correspond to an atom in the drawn molecule are kept
+    here and filtered by the caller, which has the draw coordinates.
     """
     out  = []
     seen = set()
@@ -663,9 +695,6 @@ def _bead_heavy_names(bead, hmap, mol, idx_map):
         heavy = hmap.get(name, name)
         if heavy in seen:
             continue
-        if heavy in idx_map:
-            if mol.GetAtomWithIdx(idx_map[heavy]).GetAtomicNum() == 1:
-                continue
         seen.add(heavy)
         out.append(heavy)
     return out

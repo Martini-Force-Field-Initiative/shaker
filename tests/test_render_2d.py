@@ -6,8 +6,8 @@ import pytest
 from rdkit import Chem
 from rdkit.Chem import rdDetermineBonds
 
-from shaker.render_2d import (_infer_net_charge, _isolate_residue, _load_mols,
-                              _require_bead_key)
+from shaker.render_2d import (_bead_heavy_names, _halo_text, _infer_net_charge,
+                              _isolate_residue, _load_mols, _require_bead_key)
 
 
 class TestRequireBeadKey:
@@ -242,3 +242,36 @@ class TestCrossResidueBondPerception:
         }
         assert charges.get("NH") == 1
         assert sum(charges.values()) == 0
+
+
+class TestHaloTextEscaping:
+    """Bead names/types come from user mappings and must be XML-escaped."""
+
+    def test_ampersand_is_escaped(self):
+        parts = _halo_text(0, 0, "A&B", 10, "start", "black", "grey", 0.5)
+        assert all("A&amp;B" in p for p in parts)
+        assert not any("A&B" in p for p in parts)
+
+    def test_angle_brackets_are_escaped(self):
+        parts = _halo_text(0, 0, "<x>", 10, "start", "black", "grey", 0.5)
+        assert all("&lt;x&gt;" in p for p in parts)
+
+    def test_plain_text_is_unchanged(self):
+        parts = _halo_text(0, 0, "SC1", 10, "start", "black", "grey", 0.5)
+        assert all(">SC1<" in p for p in parts)
+
+
+class TestBeadHeavyNames:
+    """Hs fold onto their bonded heavy atom; order and uniqueness preserved."""
+
+    def test_hydrogens_fold_onto_heavy_atoms(self):
+        hmap = {"HB1": "CB", "HB2": "CB"}
+        assert _bead_heavy_names(["CB", "HB1", "HB2"], hmap) == ["CB"]
+
+    def test_duplicates_collapse_but_order_kept(self):
+        hmap = {"HD1": "CD1"}
+        assert _bead_heavy_names(["CG", "CD1", "HD1", "CG"], hmap) == ["CG", "CD1"]
+
+    def test_unknown_names_pass_through(self):
+        """Caller filters these against draw coordinates."""
+        assert _bead_heavy_names(["CB", "GHOST"], {}) == ["CB", "GHOST"]
