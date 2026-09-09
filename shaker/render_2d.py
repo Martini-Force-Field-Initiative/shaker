@@ -4,6 +4,7 @@ from collections import Counter
 import math
 from pathlib import Path
 import re
+import uuid
 import warnings
 from xml.sax.saxutils import escape as _xml_escape
 
@@ -20,7 +21,7 @@ def render_2dMapping(pdb_file, resname, mapping,
                      bead_r=15.0, conn_r=15.0, alpha=0.2, line_w=3.0,
                      font_size=24, label_dy=20.0, net_charge=None,
                      show_bead_type=None, rotate=0.0, mirror=False,
-                     transparent=False):
+                     transparent=True):
     """
     Render a 2D atomistic structure with an overlaid coarse-grained (CG) mapping.
 
@@ -99,9 +100,9 @@ def render_2dMapping(pdb_file, resname, mapping,
         the molecule has potential stereocentres, since a reflection
         draws the opposite configuration at each of them.
     transparent : bool, optional
-        If True, omit the opaque background so the figure can be placed
-        on any backdrop. The default draws a white background covering
-        the whole canvas, including any margin added to fit labels.
+        If True (default), omit the background so the figure can be placed
+        on any backdrop. Pass False for an opaque white background, which
+        covers the whole canvas including any margin added to fit labels.
 
     Returns
     -------
@@ -166,6 +167,12 @@ def render_2dMapping(pdb_file, resname, mapping,
     label_layer   = []
     label_specs   = []
     extents       = []   # (x, y) corners of every overlay element drawn
+
+    # Element ids have to be unique across the whole document, not just
+    # this figure: two renders shown in one notebook are inlined into the
+    # same DOM, where url(#...) resolves to the first match — so without
+    # this the second figure's outlines would use the first figure's masks.
+    uid = uuid.uuid4().hex[:8]
 
     for bead_idx, (bead, label, (r, g, b)) in enumerate(zip(bead_assignments, bead_names, colors)):
         weights = Counter(hmap.get(a, a) for a in bead)
@@ -232,7 +239,7 @@ def render_2dMapping(pdb_file, resname, mapping,
                 bx1 = max(px for px, _ in pts) + reach
                 by1 = max(py for _, py in pts) + reach
 
-                mask_id = f"capsule_mask_{bead_idx}"
+                mask_id = f"capsule_mask_{uid}_{bead_idx}"
                 shading_layer.append(
                     f'<mask id="{mask_id}">'
                     f'<rect x="{bx0:.2f}" y="{by0:.2f}" '
@@ -273,16 +280,15 @@ def render_2dMapping(pdb_file, resname, mapping,
         # overhangs is accommodated by growing the canvas afterwards
         # (see `_fit_canvas`), rather than flipping some labels to the
         # opposite side and making placement uneven across the figure.
-        tx     = cx + label_offset
-        anchor = "start"
-        ty     = cy + label_dy
+        tx = cx + label_offset
+        ty = cy + label_dy
 
         height = font_size * 1.2
         if bead_type:
             height += type_font_size * 1.2
 
         label_specs.append({"label": label, "type": bead_type, "tx": tx, "ty": ty,
-                            "anchor": anchor, "edge": label_color, "outline": outline,
+                            "edge": label_color, "outline": outline,
                             "width": width, "height": height,
                             "type_font_size": type_font_size})
 
@@ -290,22 +296,23 @@ def render_2dMapping(pdb_file, resname, mapping,
 
     for spec in label_specs:
         label_layer.extend(_halo_text(
-            spec["tx"], spec["ty"], spec["label"], font_size, spec["anchor"],
+            spec["tx"], spec["ty"], spec["label"], font_size, "start",
             spec["edge"], spec["outline"], stroke_width=0.8, bold=True))
 
         if spec["type"]:
             type_font_size = spec["type_font_size"]
             type_ty = spec["ty"] + font_size * 0.5 + type_font_size * 0.5 + 2
             label_layer.extend(_halo_text(
-                spec["tx"], type_ty, spec["type"], type_font_size, spec["anchor"],
+                spec["tx"], type_ty, spec["type"], type_font_size, "start",
                 spec["edge"], spec["outline"], stroke_width=0.6, italic=True))
 
         # Recorded after collision avoidance, which may have moved "ty".
-        x0 = spec["tx"] if spec["anchor"] == "start" else spec["tx"] - spec["width"]
         y0 = spec["ty"] - font_size * 0.6
-        extents += [(x0, y0), (x0 + spec["width"], y0 + spec["height"])]
+        extents += [(spec["tx"], y0),
+                    (spec["tx"] + spec["width"], y0 + spec["height"])]
 
-    overlay = ['<g id="cg_overlay">'] + shading_layer + label_layer + ['</g>']
+    overlay = ([f'<g id="cg_overlay_{uid}" class="cg_overlay">']
+               + shading_layer + label_layer + ['</g>'])
 
     parts = svg.rsplit("</svg>", 1)
     svg   = parts[0] + "\n".join(overlay) + "\n</svg>" + parts[1]
@@ -751,15 +758,9 @@ def _avoid_label_collisions(label_specs, font_size, min_gap=2.0):
     placed = []  # (x_min, x_max, y_min, y_max) of already-placed labels
 
     def _box_for(spec, ty):
-        width = spec["width"]
         height = spec.get("height", font_size * 1.2)
-        if spec["anchor"] == "start":
-            x_min, x_max = spec["tx"], spec["tx"] + width
-        else:
-            x_min, x_max = spec["tx"] - width, spec["tx"]
         y_min = ty - font_size * 0.6
-        y_max = y_min + height
-        return x_min, x_max, y_min, y_max
+        return (spec["tx"], spec["tx"] + spec["width"], y_min, y_min + height)
 
     def _overlaps_any(box):
         x_min, x_max, y_min, y_max = box

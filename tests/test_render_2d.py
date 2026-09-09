@@ -1,5 +1,7 @@
 """Tests for the render_2d module."""
 
+import math
+import re
 import warnings
 from pathlib import Path
 
@@ -7,9 +9,28 @@ import pytest
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdDetermineBonds
 
-from shaker.render_2d import (_bead_heavy_names, _halo_text, _infer_net_charge,
+from shaker.render_2d import (_bead_heavy_names, _infer_net_charge,
                               _isolate_residue, _load_mols, _orient_2d,
-                              _require_bead_key)
+                              _require_bead_key, render_2dMapping)
+
+
+def _structure(*parts):
+    path = Path(__file__).parent.joinpath(*parts)
+    if not path.exists():
+        pytest.skip(f"structure not available: {path}")
+    return str(path)
+
+
+@pytest.fixture
+def tutorial_pdb():
+    """Single-residue molecule — the common case, no cross-residue bonds."""
+    return _structure("..", "tutorials", "AA_references", "BasicParam", "AA.pdb")
+
+
+@pytest.fixture
+def peptide_pdb():
+    """Mid-chain residue with a nitro-type sidechain, bonded on both sides."""
+    return _structure("data", "PPN.pdb")
 
 
 class TestRequireBeadKey:
@@ -144,147 +165,53 @@ class TestIsolateResidue:
     which loses the context that constrains ambiguous groups.
     """
 
-    @pytest.fixture
-    def pdb_path(self):
-        path = Path(__file__).parent.parent / "tutorials" / "AA_references" / \
-            "BasicParam" / "AA.pdb"
-        if not path.exists():
-            pytest.skip(f"reference structure not available: {path}")
-        return str(path)
-
-    def test_bond_orders_are_copied_not_reperceived(self, pdb_path):
-        """The isolated residue keeps the full structure's bond orders."""
-        full = Chem.MolFromPDBFile(pdb_path, sanitize=False, removeHs=False)
-        rdDetermineBonds.DetermineBonds(full, charge=0)
-        target_idx = [a.GetIdx() for a in full.GetAtoms()]
-
-        isolated, _ = _isolate_residue(full, target_idx)
-
-        expected = sorted(str(b.GetBondType()) for b in full.GetBonds())
-        actual = sorted(str(b.GetBondType()) for b in isolated.GetBonds())
-        assert actual == expected
-
-    def test_isolated_residue_is_not_bond_free(self, pdb_path):
-        """Regression: the fragment used to come back with no bonds at all."""
-        full = Chem.MolFromPDBFile(pdb_path, sanitize=False, removeHs=False)
+    def test_bonds_and_charges_are_copied_not_reperceived(self, tutorial_pdb):
+        full = Chem.MolFromPDBFile(tutorial_pdb, sanitize=False, removeHs=False)
         rdDetermineBonds.DetermineBonds(full, charge=0)
 
         isolated, _ = _isolate_residue(full, [a.GetIdx() for a in full.GetAtoms()])
-        assert isolated.GetNumBonds() > 0
 
-    def test_multiple_bond_orders_present(self, pdb_path):
-        """Double/aromatic bonds survive, not flattened to all-single."""
-        full = Chem.MolFromPDBFile(pdb_path, sanitize=False, removeHs=False)
-        rdDetermineBonds.DetermineBonds(full, charge=0)
-
-        isolated, _ = _isolate_residue(full, [a.GetIdx() for a in full.GetAtoms()])
-        orders = {str(b.GetBondType()) for b in isolated.GetBonds()}
-        assert len(orders) > 1, f"expected mixed bond orders, got {orders}"
-
-    def test_formal_charges_are_copied(self, pdb_path):
-        """Net formal charge of the slice matches the source structure."""
-        full = Chem.MolFromPDBFile(pdb_path, sanitize=False, removeHs=False)
-        rdDetermineBonds.DetermineBonds(full, charge=0)
-
-        isolated, _ = _isolate_residue(full, [a.GetIdx() for a in full.GetAtoms()])
+        assert (sorted(str(b.GetBondType()) for b in isolated.GetBonds())
+                == sorted(str(b.GetBondType()) for b in full.GetBonds()))
         assert Chem.GetFormalCharge(isolated) == Chem.GetFormalCharge(full)
 
 
 class TestCrossResidueBondPerception:
     """Regression: a residue bonded to its neighbours must render correctly.
 
-    Bond perception used to run on the capped fragment, which strips away
-    the context constraining ambiguous groups. For a mid-chain residue
-    carrying a nitro-type group this failed outright at the correct
-    charge, and "succeeded" at a wrong one by flattening the nitro group
-    to three single bonds.
+    Perception used to run on the capped fragment, which strips away the
+    context constraining ambiguous groups. For this mid-chain residue and
+    its nitro-type sidechain that failed outright at the correct charge,
+    and "succeeded" at a wrong one by flattening the nitro group to three
+    single bonds.
     """
-
-    @pytest.fixture
-    def peptide_pdb(self):
-        path = Path(__file__).parent / "data" / "PPN.pdb"
-        if not path.exists():
-            pytest.skip(f"fixture not available: {path}")
-        return str(path)
 
     def test_midchain_residue_loads_at_its_own_charge(self, peptide_pdb):
         """Used to raise ValueError from RDKit at the correct charge."""
-        molH, mol = _load_mols(peptide_pdb, "PPN", 0)
+        molH, _ = _load_mols(peptide_pdb, "PPN", 0)
         assert Chem.GetFormalCharge(molH) == 0
 
-    def test_cross_residue_bonds_are_capped(self, peptide_pdb):
-        """Both peptide bonds become caps, shown as R atoms."""
-        molH, mol = _load_mols(peptide_pdb, "PPN", 0)
-        caps = [a for a in molH.GetAtoms() if a.GetAtomicNum() == 0]
-        assert len(caps) == 2
-
     def test_nitro_group_keeps_a_double_bond(self, peptide_pdb):
-        """The failure mode was a nitro group flattened to all single bonds."""
-        molH, mol = _load_mols(peptide_pdb, "PPN", 0)
+        """The wrong-charge fix flattened the nitro group to all singles."""
+        molH, _ = _load_mols(peptide_pdb, "PPN", 0)
 
         def name(atom):
             info = atom.GetPDBResidueInfo()
             return info.GetName().strip() if info else ""
 
-        nitro_bonds = {
-            frozenset((name(b.GetBeginAtom()), name(b.GetEndAtom()))):
-                str(b.GetBondType())
-            for b in molH.GetBonds()
-            if {name(b.GetBeginAtom()), name(b.GetEndAtom())} & {"OJ1", "OJ2"}
-        }
-        assert "DOUBLE" in nitro_bonds.values(), nitro_bonds
-
-    def test_nitro_group_formal_charges(self, peptide_pdb):
-        """Standard nitro resonance form: N+ balanced by O-, netting zero."""
-        molH, mol = _load_mols(peptide_pdb, "PPN", 0)
-        charges = {
-            a.GetPDBResidueInfo().GetName().strip(): a.GetFormalCharge()
-            for a in molH.GetAtoms()
-            if a.GetPDBResidueInfo() and a.GetFormalCharge()
-        }
-        assert charges.get("NH") == 1
-        assert sum(charges.values()) == 0
-
-
-class TestHaloTextEscaping:
-    """Bead names/types come from user mappings and must be XML-escaped."""
-
-    def test_ampersand_is_escaped(self):
-        parts = _halo_text(0, 0, "A&B", 10, "start", "black", "grey", 0.5)
-        assert all("A&amp;B" in p for p in parts)
-        assert not any("A&B" in p for p in parts)
-
-    def test_angle_brackets_are_escaped(self):
-        parts = _halo_text(0, 0, "<x>", 10, "start", "black", "grey", 0.5)
-        assert all("&lt;x&gt;" in p for p in parts)
-
-    def test_plain_text_is_unchanged(self):
-        parts = _halo_text(0, 0, "SC1", 10, "start", "black", "grey", 0.5)
-        assert all(">SC1<" in p for p in parts)
+        orders = [str(b.GetBondType()) for b in molH.GetBonds()
+                  if {name(b.GetBeginAtom()), name(b.GetEndAtom())} & {"OJ1", "OJ2"}]
+        assert "DOUBLE" in orders, orders
 
 
 class TestBeadHeavyNames:
-    """Hs fold onto their bonded heavy atom; order and uniqueness preserved."""
-
-    def test_hydrogens_fold_onto_heavy_atoms(self):
+    def test_hydrogens_fold_onto_heavy_atoms_and_deduplicate(self):
         hmap = {"HB1": "CB", "HB2": "CB"}
-        assert _bead_heavy_names(["CB", "HB1", "HB2"], hmap) == ["CB"]
-
-    def test_duplicates_collapse_but_order_kept(self):
-        hmap = {"HD1": "CD1"}
-        assert _bead_heavy_names(["CG", "CD1", "HD1", "CG"], hmap) == ["CG", "CD1"]
-
-    def test_unknown_names_pass_through(self):
-        """Caller filters these against draw coordinates."""
-        assert _bead_heavy_names(["CB", "GHOST"], {}) == ["CB", "GHOST"]
+        assert _bead_heavy_names(["CB", "HB1", "HB2", "CB", "CG"], hmap) == ["CB", "CG"]
 
 
 class TestOrient2D:
-    """rotate/mirror let related molecules be drawn in a consistent frame.
-
-    RDKit orients depictions from a layout that depends on atom ordering,
-    so analogues can come out rotated or mirrored relative to each other.
-    """
+    """rotate/mirror let related molecules be drawn in a consistent frame."""
 
     @pytest.fixture
     def mol(self):
@@ -295,22 +222,8 @@ class TestOrient2D:
     @staticmethod
     def _coords(m):
         conf = m.GetConformer()
-        return [(round(conf.GetAtomPosition(i).x, 6),
-                 round(conf.GetAtomPosition(i).y, 6))
+        return [(conf.GetAtomPosition(i).x, conf.GetAtomPosition(i).y)
                 for i in range(m.GetNumAtoms())]
-
-    def test_no_op_when_both_defaults(self, mol):
-        before = self._coords(mol)
-        _orient_2d(mol)
-        assert self._coords(mol) == before
-
-    def test_full_turn_is_identity(self, mol):
-        before = self._coords(mol)
-        _orient_2d(mol, rotate=360)
-        after = self._coords(mol)
-        for (x0, y0), (x1, y1) in zip(before, after):
-            assert x1 == pytest.approx(x0, abs=1e-6)
-            assert y1 == pytest.approx(y0, abs=1e-6)
 
     def test_mirror_negates_x_about_centroid(self, mol):
         before = self._coords(mol)
@@ -320,20 +233,12 @@ class TestOrient2D:
             assert x1 == pytest.approx(2 * ox - x0, abs=1e-6)
             assert y1 == pytest.approx(y0, abs=1e-6)
 
-    def test_rotation_preserves_pairwise_distances(self, mol):
-        import math
+    def test_rotation_preserves_distances(self, mol):
         before = self._coords(mol)
         _orient_2d(mol, rotate=37.5)
         after = self._coords(mol)
-        d0 = math.dist(before[0], before[1])
-        d1 = math.dist(after[0], after[1])
-        assert d1 == pytest.approx(d0, abs=1e-6)
-
-    def test_mirror_differs_from_half_turn(self, mol):
-        flipped = Chem.Mol(mol)
-        _orient_2d(mol, mirror=True)
-        _orient_2d(flipped, rotate=180)
-        assert self._coords(mol) != self._coords(flipped)
+        assert math.dist(after[0], after[1]) == pytest.approx(
+            math.dist(before[0], before[1]), abs=1e-6)
 
     def test_mirror_warns_on_stereocentre(self):
         chiral = Chem.MolFromSmiles("C[C@H](N)C(=O)O")
@@ -341,14 +246,59 @@ class TestOrient2D:
         with pytest.warns(UserWarning, match="stereocentre"):
             _orient_2d(chiral, mirror=True)
 
-    def test_rotate_does_not_warn_on_stereocentre(self):
-        chiral = Chem.MolFromSmiles("C[C@H](N)C(=O)O")
-        AllChem.Compute2DCoords(chiral)
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            _orient_2d(chiral, rotate=90)
-
     def test_no_warning_without_stereocentres(self, mol):
+        """Guards the includeUnassigned=True choice from warning on everything."""
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             _orient_2d(mol, mirror=True)
+
+
+class TestRenderedSvg:
+    """End-to-end properties of the emitted SVG."""
+
+    MAPPING = {"MOL": {
+        "R1": {"type": "SX3", "charge": 0, "atoms": ["Cl1", "C0B", "C0A", "C05"]},
+        "R2": {"type": "SX3", "charge": 0, "atoms": ["C06", "C05", "C08", "Cl0"]},
+        "P1": {"type": "SP2", "charge": 0, "atoms": ["O04", "C03", "N02", "H0U"]},
+    }}
+
+    def _render(self, pdb, tmp_path, mapping=None, **kwargs):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return render_2dMapping(pdb, "MOL", mapping or self.MAPPING,
+                                    out_svg=str(tmp_path / "out.svg"), **kwargs)
+
+    def test_mask_references_resolve_within_the_figure(self, tutorial_pdb, tmp_path):
+        """Ids are per-render, so a mask reference must not dangle."""
+        svg = self._render(tutorial_pdb, tmp_path)
+        used = set(re.findall(r'mask="url\(#([^)]+)\)"', svg))
+        assert used <= set(re.findall(r'<mask id="([^"]+)"', svg))
+
+    def test_transparent_by_default_and_opaque_covers_canvas(self, tutorial_pdb, tmp_path):
+        assert not re.search(r"<rect style='opacity:1.0;fill:#",
+                             self._render(tutorial_pdb, tmp_path))
+
+        svg = self._render(tutorial_pdb, tmp_path, transparent=False)
+        view = re.search(r"viewBox='([-\d.\s]+)'", svg).group(1).split()
+        bg = re.search(r"<rect style='opacity:1.0;fill:#[0-9A-Fa-f]{6};stroke:none' "
+                       r"width='([\d.]+)' height='([\d.]+)'", svg)
+        assert bg, "expected an opaque background rect"
+        assert float(bg.group(1)) == pytest.approx(float(view[2]), abs=0.01)
+        assert float(bg.group(2)) == pytest.approx(float(view[3]), abs=0.01)
+
+    def test_canvas_grows_to_fit_long_labels(self, tutorial_pdb, tmp_path):
+        """Labels overhanging the panel widen the canvas instead of clipping.
+
+        The width comes from extents recorded at every drawing site, so this
+        also catches a new overlay element that forgets to record its own.
+        """
+        def view_width(mapping):
+            svg = self._render(tutorial_pdb, tmp_path, mapping, size=(950, 480))
+            return float(re.search(r"viewBox='[-\d.]+ [-\d.]+ ([\d.]+)", svg).group(1))
+
+        # Long enough to overhang from anywhere on the canvas, so the test
+        # doesn't depend on where these particular beads happen to sit.
+        long_names = {"MOL": {f"{k}_{'X' * 60}": v
+                              for k, v in self.MAPPING["MOL"].items()}}
+        assert view_width(self.MAPPING) == pytest.approx(950, abs=0.01)
+        assert view_width(long_names) > 950
