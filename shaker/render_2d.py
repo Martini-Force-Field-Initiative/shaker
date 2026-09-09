@@ -3,20 +3,25 @@
 from collections import Counter
 import math
 from pathlib import Path
+import re
+import uuid
 import warnings
+from xml.sax.saxutils import escape as _xml_escape
 
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdDetermineBonds
 from rdkit.Chem.Draw import rdMolDraw2D
+from rdkit.Geometry import Point3D
 
 from .helper import _category_from_type
 
 
 def render_2dMapping(pdb_file, resname, mapping,
                      out_svg="cg_overlay.svg", size=(950, 480), mode="connected",
-                     bead_r=30.0, conn_r=30.0, alpha=0.2, line_w=3.0,
-                     font_size=35, label_dy=20.0, net_charge=None,
-                     show_bead_type=False):
+                     bead_r=15.0, conn_r=15.0, alpha=0.2, line_w=3.0,
+                     font_size=24, label_dy=20.0, net_charge=None,
+                     show_bead_type=None, rotate=0.0, mirror=False,
+                     transparent=True):
     """
     Render a 2D atomistic structure with an overlaid coarse-grained (CG) mapping.
 
@@ -65,18 +70,39 @@ def render_2dMapping(pdb_file, resname, mapping,
     label_dy : float, optional
         Vertical offset of labels relative to the bead centroid.
     net_charge : int, optional
-        Net formal charge of the molecule, passed to RDKit's bond-order
-        determination (required for charged molecules — without it,
-        bond-order assignment is attempted assuming a neutral molecule
+        Net formal charge of everything in ``pdb_file``, passed to RDKit's
+        bond-order determination (required for charged molecules — without
+        it, bond-order assignment is attempted assuming a neutral molecule
         and fails or produces incorrect bonds for anything else). If not
         given (default), it is inferred as the sum of the per-bead
         ``"charge"`` entries in ``mapping[resname]``; this requires every
         bead in the mapping to define a ``"charge"``, and the sum must be
-        a whole number.
-    show_bead_type : bool, optional
-        If True, show each bead's ``"type"`` (if defined) in italics on a
-        second line under its name label. Beads without a ``"type"``
-        simply get no second line. Default is False.
+        a whole number. That inferred value is correct when the file holds
+        only the mapped molecule, or when everything else in it is
+        neutral; pass it explicitly when the surrounding structure is
+        itself charged.
+    show_bead_type : bool or None, optional
+        Whether to show each bead's ``"type"`` in italics on a second line
+        under its name label. The default (``None``) shows it for every
+        bead that defines one, and beads without a ``"type"`` simply get
+        no second line. Pass ``False`` to suppress the types even when the
+        mapping provides them.
+    rotate : float, optional
+        Rotate the depiction by this many degrees counter-clockwise.
+        RDKit orients depictions from a layout that depends on atom
+        ordering, so related molecules — or the same molecule read from
+        differently-ordered files — are not drawn in a consistent
+        orientation on their own.
+    mirror : bool, optional
+        Reflect the depiction. Together with ``rotate`` this reaches any
+        orientation a flat drawing can have, which is what's needed when
+        two analogues come out as mirror images of each other. Warns if
+        the molecule has potential stereocentres, since a reflection
+        draws the opposite configuration at each of them.
+    transparent : bool, optional
+        If True (default), omit the background so the figure can be placed
+        on any backdrop. Pass False for an opaque white background, which
+        covers the whole canvas including any margin added to fit labels.
 
     Returns
     -------
@@ -100,6 +126,8 @@ def render_2dMapping(pdb_file, resname, mapping,
         net_charge = _infer_net_charge(bead_map, resname)
 
     molH, mol = _load_mols(pdb_file, resname, net_charge)
+    _orient_2d(mol, rotate=rotate, mirror=mirror)
+
     idxH = _atom_name_map(molH, resname)
     idx  = _atom_name_map(mol,  resname, warn_duplicates=False)
 
@@ -123,6 +151,7 @@ def render_2dMapping(pdb_file, resname, mapping,
     opts.addStereoAnnotation = False
     opts.bondLineWidth = 3.5
     opts.scaleBondWidth = True
+    opts.clearBackground = not transparent
 
     drawer.DrawMolecule(mol)
 
@@ -137,6 +166,13 @@ def render_2dMapping(pdb_file, resname, mapping,
     shading_layer = []
     label_layer   = []
     label_specs   = []
+    extents       = []   # (x, y) corners of every overlay element drawn
+
+    # Element ids have to be unique across the whole document, not just
+    # this figure: two renders shown in one notebook are inlined into the
+    # same DOM, where url(#...) resolves to the first match — so without
+    # this the second figure's outlines would use the first figure's masks.
+    uid = uuid.uuid4().hex[:8]
 
     for bead_idx, (bead, label, (r, g, b)) in enumerate(zip(bead_assignments, bead_names, colors)):
         weights = Counter(hmap.get(a, a) for a in bead)
@@ -150,6 +186,10 @@ def render_2dMapping(pdb_file, resname, mapping,
                 UserWarning, stacklevel=2)
 
         if not weights:
+            warnings.warn(
+                f"Bead '{label}': none of its atoms resolved to a heavy atom, "
+                f"so it will not be drawn.",
+                UserWarning, stacklevel=2)
             continue
 
         sx = sy = sw = 0.0
@@ -160,7 +200,7 @@ def render_2dMapping(pdb_file, resname, mapping,
             sw += wt
         cx, cy = sx / sw, sy / sw
 
-        heavy_names = _bead_heavy_names(bead, hmap, mol, idx)
+        heavy_names = _bead_heavy_names(bead, hmap)
         atom_pts    = {name: draw_coords[name] for name in heavy_names if name in draw_coords}
         edges       = _bead_edges(mol, heavy_names, idx)
 
@@ -188,43 +228,59 @@ def render_2dMapping(pdb_file, resname, mapping,
                     _capsule_path(atom_pts[a], atom_pts[b2], conn_r + line_w)
                     for a, b2 in edges
                 )
-                mask_id = f"capsule_mask_{bead_idx}"
+                # The white rect only has to cover this bead's own wide
+                # path, but it must not be clipped to the original panel —
+                # the canvas may be grown later to fit overhanging beads,
+                # and a panel-sized rect would mask those parts away.
+                reach = conn_r + line_w
+                pts = [atom_pts[n] for e in edges for n in e]
+                bx0 = min(px for px, _ in pts) - reach
+                by0 = min(py for _, py in pts) - reach
+                bx1 = max(px for px, _ in pts) + reach
+                by1 = max(py for _, py in pts) + reach
+
+                mask_id = f"capsule_mask_{uid}_{bead_idx}"
                 shading_layer.append(
                     f'<mask id="{mask_id}">'
-                    f'<rect x="0" y="0" width="{w}" height="{h}" fill="white" />'
+                    f'<rect x="{bx0:.2f}" y="{by0:.2f}" '
+                    f'width="{bx1 - bx0:.2f}" height="{by1 - by0:.2f}" '
+                    f'fill="white" />'
                     f'<path d="{narrow}" fill="black" /></mask>')
                 shading_layer.append(
                     f'<path d="{wide}" fill="{outline}" mask="url(#{mask_id})" />')
                 shading_layer.append(f'<path d="{narrow}" fill="{fill}" />')
+                extents += [(bx0, by0), (bx1, by1)]
             else:
                 shading_layer.append(
-                    f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{bead_r:.2f}" '
-                    f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
+                    _circle(cx, cy, bead_r, fill, outline, line_w))
+                reach = bead_r + line_w / 2
+                extents += [(cx - reach, cy - reach), (cx + reach, cy + reach)]
 
         if mode == "atomblobs":
+            reach = conn_r + line_w / 2
             for x, y in atom_pts.values():
                 shading_layer.append(
-                    f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{conn_r:.2f}" '
-                    f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
+                    _circle(x, y, conn_r, fill, outline, line_w))
+                extents += [(x - reach, y - reach), (x + reach, y + reach)]
 
         if mode in ("circle", "both"):
             shading_layer.append(
-                f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{bead_r:.2f}" '
-                f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
+                _circle(cx, cy, bead_r, fill, outline, line_w))
+            reach = bead_r + line_w / 2
+            extents += [(cx - reach, cy - reach), (cx + reach, cy + reach)]
 
-        bead_type = bead_map[label].get("type") if show_bead_type else None
+        bead_type = bead_map[label].get("type") if show_bead_type is not False else None
         type_font_size = font_size * 0.7
 
         label_offset = max(bead_r, conn_r) + 2
         label_width  = _text_width(label, font_size)
         type_width   = _text_width(bead_type, type_font_size) if bead_type else 0.0
         width        = max(label_width, type_width)
-        if cx + label_offset + width > w:
-            tx     = cx - label_offset
-            anchor = "end"
-        else:
-            tx     = cx + label_offset
-            anchor = "start"
+        # Every label sits on the same side of its bead; anything that
+        # overhangs is accommodated by growing the canvas afterwards
+        # (see `_fit_canvas`), rather than flipping some labels to the
+        # opposite side and making placement uneven across the figure.
+        tx = cx + label_offset
         ty = cy + label_dy
 
         height = font_size * 1.2
@@ -232,7 +288,7 @@ def render_2dMapping(pdb_file, resname, mapping,
             height += type_font_size * 1.2
 
         label_specs.append({"label": label, "type": bead_type, "tx": tx, "ty": ty,
-                            "anchor": anchor, "edge": label_color, "outline": outline,
+                            "edge": label_color, "outline": outline,
                             "width": width, "height": height,
                             "type_font_size": type_font_size})
 
@@ -240,20 +296,27 @@ def render_2dMapping(pdb_file, resname, mapping,
 
     for spec in label_specs:
         label_layer.extend(_halo_text(
-            spec["tx"], spec["ty"], spec["label"], font_size, spec["anchor"],
+            spec["tx"], spec["ty"], spec["label"], font_size, "start",
             spec["edge"], spec["outline"], stroke_width=0.8, bold=True))
 
         if spec["type"]:
             type_font_size = spec["type_font_size"]
             type_ty = spec["ty"] + font_size * 0.5 + type_font_size * 0.5 + 2
             label_layer.extend(_halo_text(
-                spec["tx"], type_ty, spec["type"], type_font_size, spec["anchor"],
+                spec["tx"], type_ty, spec["type"], type_font_size, "start",
                 spec["edge"], spec["outline"], stroke_width=0.6, italic=True))
 
-    overlay = ['<g id="cg_overlay">'] + shading_layer + label_layer + ['</g>']
+        # Recorded after collision avoidance, which may have moved "ty".
+        y0 = spec["ty"] - font_size * 0.6
+        extents += [(spec["tx"], y0),
+                    (spec["tx"] + spec["width"], y0 + spec["height"])]
+
+    overlay = ([f'<g id="cg_overlay_{uid}" class="cg_overlay">']
+               + shading_layer + label_layer + ['</g>'])
 
     parts = svg.rsplit("</svg>", 1)
     svg   = parts[0] + "\n".join(overlay) + "\n</svg>" + parts[1]
+    svg   = _fit_canvas(svg, w, h, extents)
 
     Path(out_svg).write_text(svg, encoding="utf-8")
     return svg
@@ -264,16 +327,17 @@ def _load_mols(pdb_file, resname, net_charge):
     Return (molH, mol): sanitized molecule with Hs, and no-H molecule with
     2D coords, containing only the atoms belonging to ``resname``.
 
-    The target residue is isolated into its own molecule before bond
-    determination. Without this, any other residue present in the PDB
-    (solvent, ions, a second copy of the molecule) would be folded into
-    the same bond-order/charge search as the target molecule, which can
-    throw off both the charge balance and the inferred connectivity.
+    Bonds are determined once on the full structure, then the target
+    residue is sliced out of it, carrying the resulting bond orders and
+    formal charges with it. Determining bonds on the isolated residue
+    instead would discard the context its neighbors provide, which can
+    fail or produce wrong bond orders for groups that are ambiguous on
+    their own — see ``_isolate_residue``.
 
     If the target residue is covalently bonded to another residue (e.g.
-    an amino acid mid-chain), each such bond is capped with a generic
-    placeholder atom rather than dropped or followed — see
-    ``_isolate_residue`` and ``_label_caps_as_r``.
+    an amino acid mid-chain), each such bond is capped with a placeholder
+    atom rather than dropped or followed — see ``_isolate_residue`` and
+    ``_label_caps_as_r``.
     """
     molH_full = Chem.MolFromPDBFile(pdb_file, sanitize=False, removeHs=False)
     if molH_full is None:
@@ -301,8 +365,23 @@ def _load_mols(pdb_file, resname, net_charge):
             f"render_2dMapping expects exactly 1 residue with resname '{resname}' "
             f"in {pdb_file}, found {len(res_ids)}")
 
+    # Determine bonds on the whole structure, before isolating anything:
+    # a capped fragment lacks the chemical context that constrains the
+    # search, which can fail outright or silently produce wrong bond
+    # orders for groups that are ambiguous in isolation (see
+    # `_isolate_residue`).
+    try:
+        rdDetermineBonds.DetermineBonds(molH_full, charge=net_charge)
+    except ValueError as exc:
+        raise ValueError(
+            f"Could not determine bonds for {pdb_file} at net charge "
+            f"{net_charge}. That charge applies to everything in the file, "
+            f"not only residue '{resname}'. If the file contains more than "
+            f"the mapped molecule (other chains, charged termini, ions, "
+            f"solvent), pass net_charge explicitly as the total formal "
+            f"charge of the whole file.") from exc
+
     molH, cap_indices = _isolate_residue(molH_full, target_idx)
-    rdDetermineBonds.DetermineBonds(molH, charge=net_charge)
     Chem.SanitizeMol(molH)
 
     molH = _label_caps_as_r(molH, cap_indices)
@@ -314,46 +393,60 @@ def _load_mols(pdb_file, resname, net_charge):
 
 def _isolate_residue(molH_full, target_idx):
     """
-    Build a fresh, bond-free molecule containing ``target_idx`` plus one
-    capping atom for every bond that crosses into a different residue.
+    Build a molecule containing ``target_idx`` plus one capping atom for
+    every bond that crosses into a different residue.
 
-    Each cap is added as a generic monovalent placeholder (atomic number
-    1) at the real neighbor atom's position, so DetermineBonds sees a
-    valence-complete fragment without needing that neighbor's own
-    bonding context (which would otherwise cascade into needing its
-    other neighbors too). ``_label_caps_as_r`` converts these caps into
-    display-only "R" atoms after bond determination succeeds.
+    Bond orders and formal charges are *copied* from ``molH_full``, which
+    must already have had its bonds determined. Perception is
+    deliberately not repeated on the isolated fragment: cutting a residue
+    out removes the surrounding context that constrains the bond-order
+    search, which for groups that are ambiguous in isolation (nitro,
+    carboxylate and similar resonance cases) can fail outright or settle
+    on a valid-looking but chemically wrong assignment.
 
-    Returns (mol, cap_indices): the isolated molecule (bonds not yet
-    determined) and the indices of its capping atoms.
+    Each cap is a single-bonded hydrogen at the real neighbor atom's
+    position, giving a valence-complete fragment.
+    ``_label_caps_as_r`` converts these caps into display-only "R" atoms.
+
+    Returns (mol, cap_indices): the isolated molecule and the indices of
+    its capping atoms.
     """
     conf_full = molH_full.GetConformer()
     target_set = set(target_idx)
-    cap_positions = [
-        conf_full.GetAtomPosition(nb.GetIdx())
-        for old_i in target_idx
-        for nb in molH_full.GetAtomWithIdx(old_i).GetNeighbors()
-        if nb.GetIdx() not in target_set
-    ]
+    old2new = {old_i: new_i for new_i, old_i in enumerate(target_idx)}
 
     rw = Chem.RWMol()
-    conf = Chem.Conformer(len(target_idx) + len(cap_positions))
+    positions = []
 
-    for new_i, old_i in enumerate(target_idx):
+    for old_i in target_idx:
         src = molH_full.GetAtomWithIdx(old_i)
         new_atom = Chem.Atom(src.GetAtomicNum())
+        new_atom.SetFormalCharge(src.GetFormalCharge())
+        new_atom.SetNumExplicitHs(src.GetNumExplicitHs())
+        new_atom.SetNoImplicit(True)
         info = src.GetPDBResidueInfo()
         if info is not None:
             new_atom.SetMonomerInfo(info)
         rw.AddAtom(new_atom)
-        conf.SetAtomPosition(new_i, conf_full.GetAtomPosition(old_i))
+        positions.append(conf_full.GetAtomPosition(old_i))
+
+    for bond in molH_full.GetBonds():
+        i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+        if i in target_set and j in target_set:
+            rw.AddBond(old2new[i], old2new[j], bond.GetBondType())
 
     cap_indices = []
-    for j, pos in enumerate(cap_positions):
-        rw.AddAtom(Chem.Atom(1))
-        cap_indices.append(len(target_idx) + j)
-        conf.SetAtomPosition(len(target_idx) + j, pos)
+    for old_i in target_idx:
+        for nb in molH_full.GetAtomWithIdx(old_i).GetNeighbors():
+            if nb.GetIdx() not in target_set:
+                cap_i = rw.AddAtom(Chem.Atom(1))
+                rw.AddBond(old2new[old_i], cap_i, Chem.BondType.SINGLE)
+                cap_indices.append(cap_i)
+                positions.append(conf_full.GetAtomPosition(nb.GetIdx()))
 
+    conf = Chem.Conformer(len(positions))
+    for i, pos in enumerate(positions):
+        conf.SetAtomPosition(i, pos)
     rw.AddConformer(conf, assignId=True)
     return rw.GetMol(), cap_indices
 
@@ -375,6 +468,141 @@ def _label_caps_as_r(molH, cap_indices):
     mol = rw.GetMol()
     Chem.SanitizeMol(mol, sanitizeOps=Chem.SANITIZE_ALL ^ Chem.SANITIZE_PROPERTIES)
     return mol
+
+
+_SVG_SIZE_RE = re.compile(
+    r"width='[\d.]+px' height='[\d.]+px' viewBox='[-\d.\s]+'")
+
+# RDKit's opaque background rect, which is sized to the original panel and
+# so has to be grown along with the canvas or the added margin stays clear.
+_SVG_BACKGROUND_RE = re.compile(
+    r"(<rect style='opacity:1.0;fill:#[0-9A-Fa-f]{6};stroke:none' )"
+    r"width='[\d.]+' height='[\d.]+' x='[-\d.]+' y='[-\d.]+'")
+
+
+def _fit_canvas(svg, width, height, extents, margin=4.0):
+    """
+    Grow the SVG canvas so no overlay element is clipped.
+
+    RDKit sizes the drawing to the molecule alone, but bead outlines and
+    labels extend past the atoms and can fall outside that panel. Rather
+    than shrinking the structure to buy room, or moving labels to their
+    less natural side, the viewBox is widened by however much overhangs:
+    the drawing is untouched and only whitespace is added.
+
+    Parameters
+    ----------
+    svg : str
+        SVG source as emitted by RDKit, with the overlay already spliced in.
+    width, height : int
+        The panel size the molecule was drawn into.
+    extents : sequence of (float, float)
+        Points bounding every overlay element, in the same user-space
+        coordinates as the drawing.
+    margin : float, optional
+        Extra space left beyond the outermost element.
+
+    Returns
+    -------
+    str
+        The SVG, unchanged if everything already fits.
+    """
+    if not extents:
+        return svg
+
+    xs = [x for x, _ in extents]
+    ys = [y for _, y in extents]
+
+    x0 = min(0.0, min(xs) - margin)
+    y0 = min(0.0, min(ys) - margin)
+    x1 = max(float(width), max(xs) + margin)
+    y1 = max(float(height), max(ys) + margin)
+
+    if (x0, y0, x1, y1) == (0.0, 0.0, float(width), float(height)):
+        return svg
+
+    view_w, view_h = x1 - x0, y1 - y0
+
+    svg, n_resized = _SVG_SIZE_RE.subn(
+        f"width='{view_w:.0f}px' height='{view_h:.0f}px' "
+        f"viewBox='{x0:.2f} {y0:.2f} {view_w:.2f} {view_h:.2f}'",
+        svg, count=1)
+    if not n_resized:
+        warnings.warn(
+            "Could not resize the SVG canvas: the header written by RDKit "
+            "did not match the expected format, so bead labels or outlines "
+            "extending past the panel may be clipped.",
+            UserWarning, stacklevel=3)
+        return svg
+
+    # Grow the opaque background too, if there is one, so the added margin
+    # isn't left transparent while the middle of the figure is filled.
+    svg = _SVG_BACKGROUND_RE.sub(
+        rf"\g<1>width='{view_w:.2f}' height='{view_h:.2f}' "
+        rf"x='{x0:.2f}' y='{y0:.2f}'",
+        svg, count=1)
+    return svg
+
+
+def _orient_2d(mol, rotate=0.0, mirror=False):
+    """
+    Rotate and/or mirror a molecule's 2D depiction, in place.
+
+    RDKit orients depictions canonically from the layout it generates,
+    and that layout depends on atom ordering — so two analogues, or the
+    same molecule read from files whose atoms are ordered differently,
+    can come out rotated or mirrored relative to each other. These
+    transforms are applied to the conformer before drawing, so the draw
+    coordinates (and therefore the bead overlay) follow them.
+
+    Rotation is chemically harmless. Mirroring reflects the depiction,
+    which draws the enantiomer at any tetrahedral stereocentre, so it
+    warns when the molecule has any. (Double-bond geometry survives a
+    reflection, so only stereocentres matter.)
+
+    Parameters
+    ----------
+    mol : rdkit.Chem.Mol
+        Molecule with a 2D conformer, modified in place.
+    rotate : float, optional
+        Rotation in degrees, counter-clockwise, about the centroid.
+    mirror : bool, optional
+        Reflect the depiction. Combined with ``rotate`` this reaches any
+        orientation a flat drawing can have.
+    """
+    if not rotate and not mirror:
+        return
+
+    if mirror:
+        centers = Chem.FindMolChiralCenters(mol, includeUnassigned=True,
+                                            useLegacyImplementation=False)
+        if centers:
+            warnings.warn(
+                f"mirror=True reflects the depiction, which draws the "
+                f"opposite configuration at the {len(centers)} potential "
+                f"stereocentre(s) in this molecule (atom indices "
+                f"{[i for i, _ in centers]}). Use rotate instead if the "
+                f"stereochemistry matters.",
+                UserWarning, stacklevel=3)
+
+    conf = mol.GetConformer()
+    n = mol.GetNumAtoms()
+    pts = [conf.GetAtomPosition(i) for i in range(n)]
+
+    # Rotate about the centroid so the result doesn't depend on where the
+    # generated layout happened to sit.
+    ox = sum(p.x for p in pts) / n
+    oy = sum(p.y for p in pts) / n
+
+    theta = math.radians(rotate)
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+
+    for i, p in enumerate(pts):
+        x = (p.x - ox) * (-1 if mirror else 1)
+        y = p.y - oy
+        conf.SetAtomPosition(i, Point3D(ox + x * cos_t - y * sin_t,
+                                        oy + x * sin_t + y * cos_t,
+                                        p.z))
 
 
 def _norm_resname(info):
@@ -464,10 +692,21 @@ def _h_to_heavy_map(molH, resname):
 def _text_width(s, font_size):
     """
     Rough text width estimate (characters x font size x a fixed average
-    glyph-width factor), used both for canvas-edge label flipping and
-    for the collision-avoidance bounding boxes below.
+    glyph-width factor), used for the collision-avoidance bounding boxes
+    and for sizing the canvas so labels aren't clipped.
+
+    The factor deliberately errs high. Bead names are typically uppercase
+    alphanumerics, which measure around 0.6-0.75 of the font size per
+    character in a sans-serif face; under-estimating clips labels or lets
+    them overlap, while over-estimating only costs a little whitespace.
     """
-    return len(s) * font_size * 0.6
+    return len(s) * font_size * 0.75
+
+
+def _circle(cx, cy, r, fill, outline, line_w):
+    """One filled, outlined SVG circle — a whole bead, or a single atom blob."""
+    return (f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{r:.2f}" '
+            f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
 
 
 def _halo_text(x, y, text, font_size, anchor, fill_color, outline_color,
@@ -477,12 +716,17 @@ def _halo_text(x, y, text, font_size, anchor, fill_color, outline_color,
     and type subtitle: a white halo pass (so the text stays legible over
     the structure regardless of what's behind it) followed by the
     colored, outlined fill pass.
+
+    Bead names and types come from the user's mapping, so the text is
+    XML-escaped — an unescaped "&" or "<" would otherwise produce an SVG
+    that no parser can read, without anything here failing.
     """
     style = ""
     if bold:
         style += ' font-weight="bold"'
     if italic:
         style += ' font-style="italic"'
+    text = _xml_escape(str(text))
     common = (f'x="{x:.2f}" y="{y:.2f}" font-family="sans-serif" '
               f'font-size="{font_size:.2f}"{style} dominant-baseline="middle" '
               f'text-anchor="{anchor}"')
@@ -514,15 +758,9 @@ def _avoid_label_collisions(label_specs, font_size, min_gap=2.0):
     placed = []  # (x_min, x_max, y_min, y_max) of already-placed labels
 
     def _box_for(spec, ty):
-        width = spec["width"]
         height = spec.get("height", font_size * 1.2)
-        if spec["anchor"] == "start":
-            x_min, x_max = spec["tx"], spec["tx"] + width
-        else:
-            x_min, x_max = spec["tx"] - width, spec["tx"]
         y_min = ty - font_size * 0.6
-        y_max = y_min + height
-        return x_min, x_max, y_min, y_max
+        return (spec["tx"], spec["tx"] + spec["width"], y_min, y_min + height)
 
     def _overlaps_any(box):
         x_min, x_max, y_min, y_max = box
@@ -531,6 +769,7 @@ def _avoid_label_collisions(label_specs, font_size, min_gap=2.0):
                 return True
         return False
 
+    crowded = []
     for spec in label_specs:
         pref_ty = spec["ty"]
         height = spec.get("height", font_size * 1.2)
@@ -551,9 +790,18 @@ def _avoid_label_collisions(label_specs, font_size, min_gap=2.0):
             if not _overlaps_any(box):
                 chosen_ty = cand
                 break
+        else:
+            crowded.append(spec["label"])
 
         spec["ty"] = chosen_ty
         placed.append(_box_for(spec, chosen_ty))
+
+    if crowded:
+        warnings.warn(
+            f"Could not place {len(crowded)} bead label(s) without overlap "
+            f"({', '.join(crowded)}); they are drawn at their preferred "
+            f"position. A larger canvas or smaller font_size may help.",
+            UserWarning, stacklevel=3)
 
 
 def _palette(n):
@@ -619,10 +867,13 @@ def _bead_colors(bead_map):
     return _palette(len(bead_defs))
 
 
-def _bead_heavy_names(bead, hmap, mol, idx_map):
+def _bead_heavy_names(bead, hmap):
     """
     Unique heavy atoms contributing to a bead, with Hs folded onto their
-    bonded heavy atoms.
+    bonded heavy atoms, in first-seen order.
+
+    Names that don't correspond to an atom in the drawn molecule are kept
+    here and filtered by the caller, which has the draw coordinates.
     """
     out  = []
     seen = set()
@@ -630,9 +881,6 @@ def _bead_heavy_names(bead, hmap, mol, idx_map):
         heavy = hmap.get(name, name)
         if heavy in seen:
             continue
-        if heavy in idx_map:
-            if mol.GetAtomWithIdx(idx_map[heavy]).GetAtomicNum() == 1:
-                continue
         seen.add(heavy)
         out.append(heavy)
     return out
