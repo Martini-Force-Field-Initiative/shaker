@@ -15,9 +15,9 @@ from .helper import _category_from_type
 
 def render_2dMapping(pdb_file, resname, mapping,
                      out_svg="cg_overlay.svg", size=(950, 480), mode="connected",
-                     bead_r=30.0, conn_r=30.0, alpha=0.2, line_w=3.0,
-                     font_size=35, label_dy=20.0, net_charge=None,
-                     show_bead_type=False):
+                     bead_r=15.0, conn_r=15.0, alpha=0.2, line_w=3.0,
+                     font_size=24, label_dy=20.0, net_charge=None,
+                     show_bead_type=None):
     """
     Render a 2D atomistic structure with an overlaid coarse-grained (CG) mapping.
 
@@ -77,10 +77,12 @@ def render_2dMapping(pdb_file, resname, mapping,
         only the mapped molecule, or when everything else in it is
         neutral; pass it explicitly when the surrounding structure is
         itself charged.
-    show_bead_type : bool, optional
-        If True, show each bead's ``"type"`` (if defined) in italics on a
-        second line under its name label. Beads without a ``"type"``
-        simply get no second line. Default is False.
+    show_bead_type : bool or None, optional
+        Whether to show each bead's ``"type"`` in italics on a second line
+        under its name label. The default (``None``) shows it for every
+        bead that defines one, and beads without a ``"type"`` simply get
+        no second line. Pass ``False`` to suppress the types even when the
+        mapping provides them.
 
     Returns
     -------
@@ -217,7 +219,7 @@ def render_2dMapping(pdb_file, resname, mapping,
             shading_layer.append(
                 _circle(cx, cy, bead_r, fill, outline, line_w))
 
-        bead_type = bead_map[label].get("type") if show_bead_type else None
+        bead_type = bead_map[label].get("type") if show_bead_type is not False else None
         type_font_size = font_size * 0.7
 
         label_offset = max(bead_r, conn_r) + 2
