@@ -3,6 +3,7 @@
 from collections import Counter
 import math
 from pathlib import Path
+import re
 import warnings
 from xml.sax.saxutils import escape as _xml_escape
 
@@ -158,6 +159,7 @@ def render_2dMapping(pdb_file, resname, mapping,
     shading_layer = []
     label_layer   = []
     label_specs   = []
+    extents       = []   # (x, y) corners of every overlay element drawn
 
     for bead_idx, (bead, label, (r, g, b)) in enumerate(zip(bead_assignments, bead_names, colors)):
         weights = Counter(hmap.get(a, a) for a in bead)
@@ -213,26 +215,41 @@ def render_2dMapping(pdb_file, resname, mapping,
                     _capsule_path(atom_pts[a], atom_pts[b2], conn_r + line_w)
                     for a, b2 in edges
                 )
+                # The white rect must cover the wide path wherever it
+                # lands, including outside the original panel — the canvas
+                # may be grown later to fit overhanging beads, and a rect
+                # sized to the panel would mask those parts away.
                 mask_id = f"capsule_mask_{bead_idx}"
                 shading_layer.append(
                     f'<mask id="{mask_id}">'
-                    f'<rect x="0" y="0" width="{w}" height="{h}" fill="white" />'
+                    f'<rect x="-10000" y="-10000" width="30000" height="30000" '
+                    f'fill="white" />'
                     f'<path d="{narrow}" fill="black" /></mask>')
                 shading_layer.append(
                     f'<path d="{wide}" fill="{outline}" mask="url(#{mask_id})" />')
                 shading_layer.append(f'<path d="{narrow}" fill="{fill}" />')
+                reach = conn_r + line_w
+                for a, b2 in edges:
+                    for px, py in (atom_pts[a], atom_pts[b2]):
+                        extents += [(px - reach, py - reach), (px + reach, py + reach)]
             else:
                 shading_layer.append(
                     _circle(cx, cy, bead_r, fill, outline, line_w))
+                reach = bead_r + line_w / 2
+                extents += [(cx - reach, cy - reach), (cx + reach, cy + reach)]
 
         if mode == "atomblobs":
+            reach = conn_r + line_w / 2
             for x, y in atom_pts.values():
                 shading_layer.append(
                     _circle(x, y, conn_r, fill, outline, line_w))
+                extents += [(x - reach, y - reach), (x + reach, y + reach)]
 
         if mode in ("circle", "both"):
             shading_layer.append(
                 _circle(cx, cy, bead_r, fill, outline, line_w))
+            reach = bead_r + line_w / 2
+            extents += [(cx - reach, cy - reach), (cx + reach, cy + reach)]
 
         bead_type = bead_map[label].get("type") if show_bead_type is not False else None
         type_font_size = font_size * 0.7
@@ -241,19 +258,13 @@ def render_2dMapping(pdb_file, resname, mapping,
         label_width  = _text_width(label, font_size)
         type_width   = _text_width(bead_type, type_font_size) if bead_type else 0.0
         width        = max(label_width, type_width)
-        # Grow the label to the right by default, flipping to the left
-        # only when that would overrun the right edge *and* the flipped
-        # label actually fits — otherwise flipping just moves the overflow
-        # to the other side.
-        overflows_right = cx + label_offset + width > w
-        fits_flipped    = cx - label_offset - width >= 0
-        if overflows_right and fits_flipped:
-            tx     = cx - label_offset
-            anchor = "end"
-        else:
-            tx     = cx + label_offset
-            anchor = "start"
-        ty = cy + label_dy
+        # Every label sits on the same side of its bead; anything that
+        # overhangs is accommodated by growing the canvas afterwards
+        # (see `_fit_canvas`), rather than flipping some labels to the
+        # opposite side and making placement uneven across the figure.
+        tx     = cx + label_offset
+        anchor = "start"
+        ty     = cy + label_dy
 
         height = font_size * 1.2
         if bead_type:
@@ -278,10 +289,16 @@ def render_2dMapping(pdb_file, resname, mapping,
                 spec["tx"], type_ty, spec["type"], type_font_size, spec["anchor"],
                 spec["edge"], spec["outline"], stroke_width=0.6, italic=True))
 
+        # Recorded after collision avoidance, which may have moved "ty".
+        x0 = spec["tx"] if spec["anchor"] == "start" else spec["tx"] - spec["width"]
+        y0 = spec["ty"] - font_size * 0.6
+        extents += [(x0, y0), (x0 + spec["width"], y0 + spec["height"])]
+
     overlay = ['<g id="cg_overlay">'] + shading_layer + label_layer + ['</g>']
 
     parts = svg.rsplit("</svg>", 1)
     svg   = parts[0] + "\n".join(overlay) + "\n</svg>" + parts[1]
+    svg   = _fit_canvas(svg, w, h, extents)
 
     Path(out_svg).write_text(svg, encoding="utf-8")
     return svg
@@ -435,6 +452,58 @@ def _label_caps_as_r(molH, cap_indices):
     return mol
 
 
+_SVG_SIZE_RE = re.compile(
+    r"width='[\d.]+px' height='[\d.]+px' viewBox='[-\d.\s]+'")
+
+
+def _fit_canvas(svg, width, height, extents, margin=4.0):
+    """
+    Grow the SVG canvas so no overlay element is clipped.
+
+    RDKit sizes the drawing to the molecule alone, but bead outlines and
+    labels extend past the atoms and can fall outside that panel. Rather
+    than shrinking the structure to buy room, or moving labels to their
+    less natural side, the viewBox is widened by however much overhangs:
+    the drawing is untouched and only whitespace is added.
+
+    Parameters
+    ----------
+    svg : str
+        SVG source as emitted by RDKit, with the overlay already spliced in.
+    width, height : int
+        The panel size the molecule was drawn into.
+    extents : sequence of (float, float)
+        Points bounding every overlay element, in the same user-space
+        coordinates as the drawing.
+    margin : float, optional
+        Extra space left beyond the outermost element.
+
+    Returns
+    -------
+    str
+        The SVG, unchanged if everything already fits.
+    """
+    if not extents:
+        return svg
+
+    xs = [x for x, _ in extents]
+    ys = [y for _, y in extents]
+
+    x0 = min(0.0, min(xs) - margin)
+    y0 = min(0.0, min(ys) - margin)
+    x1 = max(float(width), max(xs) + margin)
+    y1 = max(float(height), max(ys) + margin)
+
+    if (x0, y0, x1, y1) == (0.0, 0.0, float(width), float(height)):
+        return svg
+
+    view_w, view_h = x1 - x0, y1 - y0
+    return _SVG_SIZE_RE.sub(
+        f"width='{view_w:.0f}px' height='{view_h:.0f}px' "
+        f"viewBox='{x0:.2f} {y0:.2f} {view_w:.2f} {view_h:.2f}'",
+        svg, count=1)
+
+
 def _orient_2d(mol, rotate=0.0, mirror=False):
     """
     Rotate and/or mirror a molecule's 2D depiction, in place.
@@ -583,10 +652,15 @@ def _h_to_heavy_map(molH, resname):
 def _text_width(s, font_size):
     """
     Rough text width estimate (characters x font size x a fixed average
-    glyph-width factor), used both for canvas-edge label flipping and
-    for the collision-avoidance bounding boxes below.
+    glyph-width factor), used for the collision-avoidance bounding boxes
+    and for sizing the canvas so labels aren't clipped.
+
+    The factor deliberately errs high. Bead names are typically uppercase
+    alphanumerics, which measure around 0.6-0.75 of the font size per
+    character in a sans-serif face; under-estimating clips labels or lets
+    them overlap, while over-estimating only costs a little whitespace.
     """
-    return len(s) * font_size * 0.6
+    return len(s) * font_size * 0.75
 
 
 def _circle(cx, cy, r, fill, outline, line_w):
