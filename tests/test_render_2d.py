@@ -1,13 +1,15 @@
 """Tests for the render_2d module."""
 
+import warnings
 from pathlib import Path
 
 import pytest
 from rdkit import Chem
-from rdkit.Chem import rdDetermineBonds
+from rdkit.Chem import AllChem, rdDetermineBonds
 
 from shaker.render_2d import (_bead_heavy_names, _halo_text, _infer_net_charge,
-                              _isolate_residue, _load_mols, _require_bead_key)
+                              _isolate_residue, _load_mols, _orient_2d,
+                              _require_bead_key)
 
 
 class TestRequireBeadKey:
@@ -275,3 +277,78 @@ class TestBeadHeavyNames:
     def test_unknown_names_pass_through(self):
         """Caller filters these against draw coordinates."""
         assert _bead_heavy_names(["CB", "GHOST"], {}) == ["CB", "GHOST"]
+
+
+class TestOrient2D:
+    """rotate/mirror let related molecules be drawn in a consistent frame.
+
+    RDKit orients depictions from a layout that depends on atom ordering,
+    so analogues can come out rotated or mirrored relative to each other.
+    """
+
+    @pytest.fixture
+    def mol(self):
+        m = Chem.MolFromSmiles("c1ccccc1C(=O)N")
+        AllChem.Compute2DCoords(m)
+        return m
+
+    @staticmethod
+    def _coords(m):
+        conf = m.GetConformer()
+        return [(round(conf.GetAtomPosition(i).x, 6),
+                 round(conf.GetAtomPosition(i).y, 6))
+                for i in range(m.GetNumAtoms())]
+
+    def test_no_op_when_both_defaults(self, mol):
+        before = self._coords(mol)
+        _orient_2d(mol)
+        assert self._coords(mol) == before
+
+    def test_full_turn_is_identity(self, mol):
+        before = self._coords(mol)
+        _orient_2d(mol, rotate=360)
+        after = self._coords(mol)
+        for (x0, y0), (x1, y1) in zip(before, after):
+            assert x1 == pytest.approx(x0, abs=1e-6)
+            assert y1 == pytest.approx(y0, abs=1e-6)
+
+    def test_mirror_negates_x_about_centroid(self, mol):
+        before = self._coords(mol)
+        ox = sum(x for x, _ in before) / len(before)
+        _orient_2d(mol, mirror=True)
+        for (x0, y0), (x1, y1) in zip(before, self._coords(mol)):
+            assert x1 == pytest.approx(2 * ox - x0, abs=1e-6)
+            assert y1 == pytest.approx(y0, abs=1e-6)
+
+    def test_rotation_preserves_pairwise_distances(self, mol):
+        import math
+        before = self._coords(mol)
+        _orient_2d(mol, rotate=37.5)
+        after = self._coords(mol)
+        d0 = math.dist(before[0], before[1])
+        d1 = math.dist(after[0], after[1])
+        assert d1 == pytest.approx(d0, abs=1e-6)
+
+    def test_mirror_differs_from_half_turn(self, mol):
+        flipped = Chem.Mol(mol)
+        _orient_2d(mol, mirror=True)
+        _orient_2d(flipped, rotate=180)
+        assert self._coords(mol) != self._coords(flipped)
+
+    def test_mirror_warns_on_stereocentre(self):
+        chiral = Chem.MolFromSmiles("C[C@H](N)C(=O)O")
+        AllChem.Compute2DCoords(chiral)
+        with pytest.warns(UserWarning, match="stereocentre"):
+            _orient_2d(chiral, mirror=True)
+
+    def test_rotate_does_not_warn_on_stereocentre(self):
+        chiral = Chem.MolFromSmiles("C[C@H](N)C(=O)O")
+        AllChem.Compute2DCoords(chiral)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            _orient_2d(chiral, rotate=90)
+
+    def test_no_warning_without_stereocentres(self, mol):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            _orient_2d(mol, mirror=True)

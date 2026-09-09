@@ -9,6 +9,7 @@ from xml.sax.saxutils import escape as _xml_escape
 from rdkit import Chem
 from rdkit.Chem import AllChem, rdDetermineBonds
 from rdkit.Chem.Draw import rdMolDraw2D
+from rdkit.Geometry import Point3D
 
 from .helper import _category_from_type
 
@@ -17,7 +18,7 @@ def render_2dMapping(pdb_file, resname, mapping,
                      out_svg="cg_overlay.svg", size=(950, 480), mode="connected",
                      bead_r=15.0, conn_r=15.0, alpha=0.2, line_w=3.0,
                      font_size=24, label_dy=20.0, net_charge=None,
-                     show_bead_type=None):
+                     show_bead_type=None, rotate=0.0, mirror=False):
     """
     Render a 2D atomistic structure with an overlaid coarse-grained (CG) mapping.
 
@@ -83,6 +84,18 @@ def render_2dMapping(pdb_file, resname, mapping,
         bead that defines one, and beads without a ``"type"`` simply get
         no second line. Pass ``False`` to suppress the types even when the
         mapping provides them.
+    rotate : float, optional
+        Rotate the depiction by this many degrees counter-clockwise.
+        RDKit orients depictions from a layout that depends on atom
+        ordering, so related molecules — or the same molecule read from
+        differently-ordered files — are not drawn in a consistent
+        orientation on their own.
+    mirror : bool, optional
+        Reflect the depiction. Together with ``rotate`` this reaches any
+        orientation a flat drawing can have, which is what's needed when
+        two analogues come out as mirror images of each other. Warns if
+        the molecule has potential stereocentres, since a reflection
+        draws the opposite configuration at each of them.
 
     Returns
     -------
@@ -106,6 +119,8 @@ def render_2dMapping(pdb_file, resname, mapping,
         net_charge = _infer_net_charge(bead_map, resname)
 
     molH, mol = _load_mols(pdb_file, resname, net_charge)
+    _orient_2d(mol, rotate=rotate, mirror=mirror)
+
     idxH = _atom_name_map(molH, resname)
     idx  = _atom_name_map(mol,  resname, warn_duplicates=False)
 
@@ -418,6 +433,67 @@ def _label_caps_as_r(molH, cap_indices):
     mol = rw.GetMol()
     Chem.SanitizeMol(mol, sanitizeOps=Chem.SANITIZE_ALL ^ Chem.SANITIZE_PROPERTIES)
     return mol
+
+
+def _orient_2d(mol, rotate=0.0, mirror=False):
+    """
+    Rotate and/or mirror a molecule's 2D depiction, in place.
+
+    RDKit orients depictions canonically from the layout it generates,
+    and that layout depends on atom ordering — so two analogues, or the
+    same molecule read from files whose atoms are ordered differently,
+    can come out rotated or mirrored relative to each other. These
+    transforms are applied to the conformer before drawing, so the draw
+    coordinates (and therefore the bead overlay) follow them.
+
+    Rotation is chemically harmless. Mirroring reflects the depiction,
+    which draws the enantiomer at any tetrahedral stereocentre, so it
+    warns when the molecule has any. (Double-bond geometry survives a
+    reflection, so only stereocentres matter.)
+
+    Parameters
+    ----------
+    mol : rdkit.Chem.Mol
+        Molecule with a 2D conformer, modified in place.
+    rotate : float, optional
+        Rotation in degrees, counter-clockwise, about the centroid.
+    mirror : bool, optional
+        Reflect the depiction. Combined with ``rotate`` this reaches any
+        orientation a flat drawing can have.
+    """
+    if not rotate and not mirror:
+        return
+
+    if mirror:
+        centers = Chem.FindMolChiralCenters(mol, includeUnassigned=True,
+                                            useLegacyImplementation=False)
+        if centers:
+            warnings.warn(
+                f"mirror=True reflects the depiction, which draws the "
+                f"opposite configuration at the {len(centers)} potential "
+                f"stereocentre(s) in this molecule (atom indices "
+                f"{[i for i, _ in centers]}). Use rotate instead if the "
+                f"stereochemistry matters.",
+                UserWarning, stacklevel=3)
+
+    conf = mol.GetConformer()
+    n = mol.GetNumAtoms()
+    pts = [conf.GetAtomPosition(i) for i in range(n)]
+
+    # Rotate about the centroid so the result doesn't depend on where the
+    # generated layout happened to sit.
+    ox = sum(p.x for p in pts) / n
+    oy = sum(p.y for p in pts) / n
+
+    theta = math.radians(rotate)
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+
+    for i, p in enumerate(pts):
+        x = (p.x - ox) * (-1 if mirror else 1)
+        y = p.y - oy
+        conf.SetAtomPosition(i, Point3D(ox + x * cos_t - y * sin_t,
+                                        oy + x * sin_t + y * cos_t,
+                                        p.z))
 
 
 def _norm_resname(info):
