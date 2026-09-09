@@ -65,14 +65,17 @@ def render_2dMapping(pdb_file, resname, mapping,
     label_dy : float, optional
         Vertical offset of labels relative to the bead centroid.
     net_charge : int, optional
-        Net formal charge of the molecule, passed to RDKit's bond-order
-        determination (required for charged molecules — without it,
-        bond-order assignment is attempted assuming a neutral molecule
+        Net formal charge of everything in ``pdb_file``, passed to RDKit's
+        bond-order determination (required for charged molecules — without
+        it, bond-order assignment is attempted assuming a neutral molecule
         and fails or produces incorrect bonds for anything else). If not
         given (default), it is inferred as the sum of the per-bead
         ``"charge"`` entries in ``mapping[resname]``; this requires every
         bead in the mapping to define a ``"charge"``, and the sum must be
-        a whole number.
+        a whole number. That inferred value is correct when the file holds
+        only the mapped molecule, or when everything else in it is
+        neutral; pass it explicitly when the surrounding structure is
+        itself charged.
     show_bead_type : bool, optional
         If True, show each bead's ``"type"`` (if defined) in italics on a
         second line under its name label. Beads without a ``"type"``
@@ -264,16 +267,17 @@ def _load_mols(pdb_file, resname, net_charge):
     Return (molH, mol): sanitized molecule with Hs, and no-H molecule with
     2D coords, containing only the atoms belonging to ``resname``.
 
-    The target residue is isolated into its own molecule before bond
-    determination. Without this, any other residue present in the PDB
-    (solvent, ions, a second copy of the molecule) would be folded into
-    the same bond-order/charge search as the target molecule, which can
-    throw off both the charge balance and the inferred connectivity.
+    Bonds are determined once on the full structure, then the target
+    residue is sliced out of it, carrying the resulting bond orders and
+    formal charges with it. Determining bonds on the isolated residue
+    instead would discard the context its neighbors provide, which can
+    fail or produce wrong bond orders for groups that are ambiguous on
+    their own — see ``_isolate_residue``.
 
     If the target residue is covalently bonded to another residue (e.g.
-    an amino acid mid-chain), each such bond is capped with a generic
-    placeholder atom rather than dropped or followed — see
-    ``_isolate_residue`` and ``_label_caps_as_r``.
+    an amino acid mid-chain), each such bond is capped with a placeholder
+    atom rather than dropped or followed — see ``_isolate_residue`` and
+    ``_label_caps_as_r``.
     """
     molH_full = Chem.MolFromPDBFile(pdb_file, sanitize=False, removeHs=False)
     if molH_full is None:
@@ -301,8 +305,23 @@ def _load_mols(pdb_file, resname, net_charge):
             f"render_2dMapping expects exactly 1 residue with resname '{resname}' "
             f"in {pdb_file}, found {len(res_ids)}")
 
+    # Determine bonds on the whole structure, before isolating anything:
+    # a capped fragment lacks the chemical context that constrains the
+    # search, which can fail outright or silently produce wrong bond
+    # orders for groups that are ambiguous in isolation (see
+    # `_isolate_residue`).
+    try:
+        rdDetermineBonds.DetermineBonds(molH_full, charge=net_charge)
+    except ValueError as exc:
+        raise ValueError(
+            f"Could not determine bonds for {pdb_file} at net charge "
+            f"{net_charge}. That charge applies to everything in the file, "
+            f"not only residue '{resname}'. If the file contains more than "
+            f"the mapped molecule (other chains, charged termini, ions, "
+            f"solvent), pass net_charge explicitly as the total formal "
+            f"charge of the whole file.") from exc
+
     molH, cap_indices = _isolate_residue(molH_full, target_idx)
-    rdDetermineBonds.DetermineBonds(molH, charge=net_charge)
     Chem.SanitizeMol(molH)
 
     molH = _label_caps_as_r(molH, cap_indices)
@@ -314,46 +333,60 @@ def _load_mols(pdb_file, resname, net_charge):
 
 def _isolate_residue(molH_full, target_idx):
     """
-    Build a fresh, bond-free molecule containing ``target_idx`` plus one
-    capping atom for every bond that crosses into a different residue.
+    Build a molecule containing ``target_idx`` plus one capping atom for
+    every bond that crosses into a different residue.
 
-    Each cap is added as a generic monovalent placeholder (atomic number
-    1) at the real neighbor atom's position, so DetermineBonds sees a
-    valence-complete fragment without needing that neighbor's own
-    bonding context (which would otherwise cascade into needing its
-    other neighbors too). ``_label_caps_as_r`` converts these caps into
-    display-only "R" atoms after bond determination succeeds.
+    Bond orders and formal charges are *copied* from ``molH_full``, which
+    must already have had its bonds determined. Perception is
+    deliberately not repeated on the isolated fragment: cutting a residue
+    out removes the surrounding context that constrains the bond-order
+    search, which for groups that are ambiguous in isolation (nitro,
+    carboxylate and similar resonance cases) can fail outright or settle
+    on a valid-looking but chemically wrong assignment.
 
-    Returns (mol, cap_indices): the isolated molecule (bonds not yet
-    determined) and the indices of its capping atoms.
+    Each cap is a single-bonded hydrogen at the real neighbor atom's
+    position, giving a valence-complete fragment.
+    ``_label_caps_as_r`` converts these caps into display-only "R" atoms.
+
+    Returns (mol, cap_indices): the isolated molecule and the indices of
+    its capping atoms.
     """
     conf_full = molH_full.GetConformer()
     target_set = set(target_idx)
-    cap_positions = [
-        conf_full.GetAtomPosition(nb.GetIdx())
-        for old_i in target_idx
-        for nb in molH_full.GetAtomWithIdx(old_i).GetNeighbors()
-        if nb.GetIdx() not in target_set
-    ]
+    old2new = {old_i: new_i for new_i, old_i in enumerate(target_idx)}
 
     rw = Chem.RWMol()
-    conf = Chem.Conformer(len(target_idx) + len(cap_positions))
+    positions = []
 
-    for new_i, old_i in enumerate(target_idx):
+    for old_i in target_idx:
         src = molH_full.GetAtomWithIdx(old_i)
         new_atom = Chem.Atom(src.GetAtomicNum())
+        new_atom.SetFormalCharge(src.GetFormalCharge())
+        new_atom.SetNumExplicitHs(src.GetNumExplicitHs())
+        new_atom.SetNoImplicit(True)
         info = src.GetPDBResidueInfo()
         if info is not None:
             new_atom.SetMonomerInfo(info)
         rw.AddAtom(new_atom)
-        conf.SetAtomPosition(new_i, conf_full.GetAtomPosition(old_i))
+        positions.append(conf_full.GetAtomPosition(old_i))
+
+    for bond in molH_full.GetBonds():
+        i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+        if i in target_set and j in target_set:
+            rw.AddBond(old2new[i], old2new[j], bond.GetBondType())
 
     cap_indices = []
-    for j, pos in enumerate(cap_positions):
-        rw.AddAtom(Chem.Atom(1))
-        cap_indices.append(len(target_idx) + j)
-        conf.SetAtomPosition(len(target_idx) + j, pos)
+    for old_i in target_idx:
+        for nb in molH_full.GetAtomWithIdx(old_i).GetNeighbors():
+            if nb.GetIdx() not in target_set:
+                cap_i = rw.AddAtom(Chem.Atom(1))
+                rw.AddBond(old2new[old_i], cap_i, Chem.BondType.SINGLE)
+                cap_indices.append(cap_i)
+                positions.append(conf_full.GetAtomPosition(nb.GetIdx()))
 
+    conf = Chem.Conformer(len(positions))
+    for i, pos in enumerate(positions):
+        conf.SetAtomPosition(i, pos)
     rw.AddConformer(conf, assignId=True)
     return rw.GetMol(), cap_indices
 
