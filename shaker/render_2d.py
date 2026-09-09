@@ -19,7 +19,8 @@ def render_2dMapping(pdb_file, resname, mapping,
                      out_svg="cg_overlay.svg", size=(950, 480), mode="connected",
                      bead_r=15.0, conn_r=15.0, alpha=0.2, line_w=3.0,
                      font_size=24, label_dy=20.0, net_charge=None,
-                     show_bead_type=None, rotate=0.0, mirror=False):
+                     show_bead_type=None, rotate=0.0, mirror=False,
+                     transparent=False):
     """
     Render a 2D atomistic structure with an overlaid coarse-grained (CG) mapping.
 
@@ -97,6 +98,10 @@ def render_2dMapping(pdb_file, resname, mapping,
         two analogues come out as mirror images of each other. Warns if
         the molecule has potential stereocentres, since a reflection
         draws the opposite configuration at each of them.
+    transparent : bool, optional
+        If True, omit the opaque background so the figure can be placed
+        on any backdrop. The default draws a white background covering
+        the whole canvas, including any margin added to fit labels.
 
     Returns
     -------
@@ -145,6 +150,7 @@ def render_2dMapping(pdb_file, resname, mapping,
     opts.addStereoAnnotation = False
     opts.bondLineWidth = 3.5
     opts.scaleBondWidth = True
+    opts.clearBackground = not transparent
 
     drawer.DrawMolecule(mol)
 
@@ -215,23 +221,28 @@ def render_2dMapping(pdb_file, resname, mapping,
                     _capsule_path(atom_pts[a], atom_pts[b2], conn_r + line_w)
                     for a, b2 in edges
                 )
-                # The white rect must cover the wide path wherever it
-                # lands, including outside the original panel — the canvas
-                # may be grown later to fit overhanging beads, and a rect
-                # sized to the panel would mask those parts away.
+                # The white rect only has to cover this bead's own wide
+                # path, but it must not be clipped to the original panel —
+                # the canvas may be grown later to fit overhanging beads,
+                # and a panel-sized rect would mask those parts away.
+                reach = conn_r + line_w
+                pts = [atom_pts[n] for e in edges for n in e]
+                bx0 = min(px for px, _ in pts) - reach
+                by0 = min(py for _, py in pts) - reach
+                bx1 = max(px for px, _ in pts) + reach
+                by1 = max(py for _, py in pts) + reach
+
                 mask_id = f"capsule_mask_{bead_idx}"
                 shading_layer.append(
                     f'<mask id="{mask_id}">'
-                    f'<rect x="-10000" y="-10000" width="30000" height="30000" '
+                    f'<rect x="{bx0:.2f}" y="{by0:.2f}" '
+                    f'width="{bx1 - bx0:.2f}" height="{by1 - by0:.2f}" '
                     f'fill="white" />'
                     f'<path d="{narrow}" fill="black" /></mask>')
                 shading_layer.append(
                     f'<path d="{wide}" fill="{outline}" mask="url(#{mask_id})" />')
                 shading_layer.append(f'<path d="{narrow}" fill="{fill}" />')
-                reach = conn_r + line_w
-                for a, b2 in edges:
-                    for px, py in (atom_pts[a], atom_pts[b2]):
-                        extents += [(px - reach, py - reach), (px + reach, py + reach)]
+                extents += [(bx0, by0), (bx1, by1)]
             else:
                 shading_layer.append(
                     _circle(cx, cy, bead_r, fill, outline, line_w))
@@ -455,6 +466,12 @@ def _label_caps_as_r(molH, cap_indices):
 _SVG_SIZE_RE = re.compile(
     r"width='[\d.]+px' height='[\d.]+px' viewBox='[-\d.\s]+'")
 
+# RDKit's opaque background rect, which is sized to the original panel and
+# so has to be grown along with the canvas or the added margin stays clear.
+_SVG_BACKGROUND_RE = re.compile(
+    r"(<rect style='opacity:1.0;fill:#[0-9A-Fa-f]{6};stroke:none' )"
+    r"width='[\d.]+' height='[\d.]+' x='[-\d.]+' y='[-\d.]+'")
+
 
 def _fit_canvas(svg, width, height, extents, margin=4.0):
     """
@@ -498,10 +515,26 @@ def _fit_canvas(svg, width, height, extents, margin=4.0):
         return svg
 
     view_w, view_h = x1 - x0, y1 - y0
-    return _SVG_SIZE_RE.sub(
+
+    svg, n_resized = _SVG_SIZE_RE.subn(
         f"width='{view_w:.0f}px' height='{view_h:.0f}px' "
         f"viewBox='{x0:.2f} {y0:.2f} {view_w:.2f} {view_h:.2f}'",
         svg, count=1)
+    if not n_resized:
+        warnings.warn(
+            "Could not resize the SVG canvas: the header written by RDKit "
+            "did not match the expected format, so bead labels or outlines "
+            "extending past the panel may be clipped.",
+            UserWarning, stacklevel=3)
+        return svg
+
+    # Grow the opaque background too, if there is one, so the added margin
+    # isn't left transparent while the middle of the figure is filled.
+    svg = _SVG_BACKGROUND_RE.sub(
+        rf"\g<1>width='{view_w:.2f}' height='{view_h:.2f}' "
+        rf"x='{x0:.2f}' y='{y0:.2f}'",
+        svg, count=1)
+    return svg
 
 
 def _orient_2d(mol, rotate=0.0, mirror=False):
