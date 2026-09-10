@@ -204,7 +204,7 @@ def render_2dMapping(pdb_file, resname, mapping,
         atom_pts    = {name: draw_coords[name] for name in heavy_names if name in draw_coords}
         edges       = _bead_edges(mol, heavy_names, idx)
 
-        fill        = _rgba(r, g, b, alpha)
+        fill        = _rgb(r, g, b)
         label_color = _rgb(r, g, b)
         outline     = _rgb(*_darken(r, g, b))
 
@@ -248,11 +248,12 @@ def render_2dMapping(pdb_file, resname, mapping,
                     f'<path d="{narrow}" fill="black" /></mask>')
                 shading_layer.append(
                     f'<path d="{wide}" fill="{outline}" mask="url(#{mask_id})" />')
-                shading_layer.append(f'<path d="{narrow}" fill="{fill}" />')
+                shading_layer.append(
+                    f'<path d="{narrow}" fill="{fill}" fill-opacity="{alpha}" />')
                 extents += [(bx0, by0), (bx1, by1)]
             else:
                 shading_layer.append(
-                    _circle(cx, cy, bead_r, fill, outline, line_w))
+                    _circle(cx, cy, bead_r, fill, outline, line_w, alpha))
                 reach = bead_r + line_w / 2
                 extents += [(cx - reach, cy - reach), (cx + reach, cy + reach)]
 
@@ -260,12 +261,12 @@ def render_2dMapping(pdb_file, resname, mapping,
             reach = conn_r + line_w / 2
             for x, y in atom_pts.values():
                 shading_layer.append(
-                    _circle(x, y, conn_r, fill, outline, line_w))
+                    _circle(x, y, conn_r, fill, outline, line_w, alpha))
                 extents += [(x - reach, y - reach), (x + reach, y + reach)]
 
         if mode in ("circle", "both"):
             shading_layer.append(
-                _circle(cx, cy, bead_r, fill, outline, line_w))
+                _circle(cx, cy, bead_r, fill, outline, line_w, alpha))
             reach = bead_r + line_w / 2
             extents += [(cx - reach, cy - reach), (cx + reach, cy + reach)]
 
@@ -703,10 +704,11 @@ def _text_width(s, font_size):
     return len(s) * font_size * 0.75
 
 
-def _circle(cx, cy, r, fill, outline, line_w):
+def _circle(cx, cy, r, fill, outline, line_w, fill_opacity):
     """One filled, outlined SVG circle — a whole bead, or a single atom blob."""
     return (f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{r:.2f}" '
-            f'fill="{fill}" stroke="{outline}" stroke-width="{line_w:.2f}" />')
+            f'fill="{fill}" fill-opacity="{fill_opacity}" '
+            f'stroke="{outline}" stroke-width="{line_w:.2f}" />')
 
 
 def _halo_text(x, y, text, font_size, anchor, fill_color, outline_color,
@@ -906,10 +908,6 @@ def _bead_edges(mol, names, idx_map):
 
 def _rgb(r, g, b):
     return f"rgb({int(r*255)},{int(g*255)},{int(b*255)})"
-
-
-def _rgba(r, g, b, a):
-    return f"rgba({int(r*255)},{int(g*255)},{int(b*255)},{a})"
 
 
 def _darken(r, g, b, factor=0.6):
