@@ -8,7 +8,7 @@ from .render import render_mapping, render_connely_surface, render_ensemble
 from .render_2d import render_2dMapping
 from .sasa import run_SASA
 from .itp import write_initial_CGitp
-from .system_builders import prepare_setup_water, runSim
+from .system_builders import prepare_setup_water, runSim, list_iterations
 from .estimator import bonded_estimator
 from .measurer import measure_bonded_terms
 from .plot import plot_sasa_dir, plot_bonded_distributions

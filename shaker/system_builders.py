@@ -7,8 +7,14 @@ from importlib.resources import files
 import numpy as np
 import glob
 import os
+import re
+import json
+import shutil
+from datetime import datetime
 from pathlib import Path
 import shlex
+
+_ITER_RE = re.compile(r"^iter_(\d+)_\d{8}_\d{6}$")
 
 def prepare_setup_water(initial_structure, structure_itp='initial_CG.itp',
                         n_mols=1, box_size=4, 
@@ -147,11 +153,12 @@ def prepare_setup_water(initial_structure, structure_itp='initial_CG.itp',
 
     
 def runSim (minMDP=None, relMDP=None, prodMDP=None,
-            minOPT='-pin on -nt 8', 
-            relOPT='-pin on -nt 8', 
-            prodOPT='-pin on -nt 8', 
+            minOPT='-pin on -nt 8',
+            relOPT='-pin on -nt 8',
+            prodOPT='-pin on -nt 8',
             maxwarn=1, gmx_loc='',
-            cleanTraj=True, cleanOldRun=True,):
+            cleanTraj=True, cleanOldRun=True,
+            mapping=None, keep_last=-1,):
     '''
     Run a standard Martini simulation pipeline (minimization → relaxation → production).
 
@@ -173,6 +180,21 @@ def runSim (minMDP=None, relMDP=None, prodMDP=None,
         If True, post-process the production trajectory using `_traj_cleanup`.
     cleanOldRun : bool, optional
         If True, remove files from previous runs using `_clean_old_files()`.
+    mapping : dict, optional
+        SHAKER mapping dictionary for the simulated molecule. If provided
+        (and checkpointing is enabled via `keep_last`), saved as
+        `mapping.json` alongside the checkpointed iteration for later
+        reference.
+    keep_last : int or None, optional
+        Controls iteration checkpointing after this run (only takes effect
+        if `cleanTraj=True`); see `_checkpoint`:
+
+        - None — do not checkpoint at all.
+        - -1 (default) — checkpoint and keep every iteration.
+        - a positive integer N — checkpoint and keep only the N most
+          recent iterations, pruning older ones.
+
+        Use `list_iterations` to inspect saved iterations.
 
     Notes
     -----
@@ -182,7 +204,7 @@ def runSim (minMDP=None, relMDP=None, prodMDP=None,
     - `topol.top`    : system topology
 
     These are the final outputs of `prepare_setup_water`.
-    
+
     Output files use the prefixes `m`, `r`, and `p` corresponding to
     minimization, relaxation, and production stages.
     '''
@@ -224,6 +246,44 @@ def runSim (minMDP=None, relMDP=None, prodMDP=None,
 
     if cleanTraj:
         _traj_cleanup('p.gro', 'p.xtc', 'p.tpr')
+        _checkpoint(mapping=mapping, keep_last=keep_last)
+
+
+def list_iterations(run_dir):
+    '''
+    List checkpointed simulation iterations in a run directory.
+
+    Iterations are created automatically by `runSim` (when `keep_last` is
+    not None) as `iter_<N>_<timestamp>` folders, each containing the cleaned
+    trajectory from that run (`pbc.pdb`/`pbc.xtc`), any `.itp` file(s)
+    simulated, and `mapping.json` if a mapping was provided to `runSim`.
+
+    Parameters
+    ----------
+    run_dir : str or Path
+        Directory that `runSim` was executed in (e.g. the `CG_WAT` folder
+        used in the tutorials).
+
+    Returns
+    -------
+    list of Path
+        Iteration folders found in `run_dir`, sorted oldest to newest by
+        iteration index. Empty if none exist.
+    '''
+    run_dir = Path(run_dir)
+    if not run_dir.is_dir():
+        return []
+
+    found = []
+    for entry in run_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        match = _ITER_RE.match(entry.name)
+        if match:
+            found.append((int(match.group(1)), entry))
+
+    found.sort(key=lambda pair: pair[0])
+    return [path for _, path in found]
 
 
 def _run(cmd, *, log=None, env=None, input_text=None, cwd=None):
@@ -279,3 +339,82 @@ def _clean_old_files():
         for f in glob.glob(pattern):
             if os.path.isfile(f):
                 os.remove(f)
+
+
+def _checkpoint(mapping=None, itp_glob="*.itp", keep_last=-1):
+    '''
+    Save a snapshot of the just-completed run into a new iteration folder in
+    the current working directory, then prune old iterations beyond
+    `keep_last`.
+
+    Snapshots `pbc.pdb`/`pbc.xtc` (written by `_traj_cleanup`) and any
+    `.itp` file(s) matching `itp_glob` into `./iter_<N>_<timestamp>/`, where
+    `N` is one more than the highest existing iteration index (see
+    `list_iterations`). If `pbc.pdb`/`pbc.xtc` are not present (e.g.
+    `cleanTraj=False`), nothing is saved.
+
+    Parameters
+    ----------
+    mapping : dict, optional
+        SHAKER mapping dictionary to save as `mapping.json` alongside the
+        snapshot. Skipped if None.
+    itp_glob : str, optional
+        Glob pattern (relative to the working directory) used to find the
+        solute `.itp` file(s) to snapshot. Default is "*.itp".
+    keep_last : int or None, optional
+        Controls whether/how many iterations are retained:
+
+        - None — checkpointing is disabled; this call is a no-op.
+        - -1 (default) — keep every iteration, no pruning.
+        - a positive integer N — after saving this snapshot, delete the
+          oldest iteration folders so that at most N remain.
+
+    Returns
+    -------
+    Path or None
+        Path to the newly created iteration folder, or None if
+        checkpointing is disabled (`keep_last=None`) or there was no
+        cleaned trajectory to snapshot.
+
+    Raises
+    ------
+    ValueError
+        If `keep_last` is 0 or a negative integer other than -1.
+    '''
+    if keep_last is None:
+        return None
+
+    if keep_last != -1 and keep_last < 1:
+        raise ValueError(
+            "keep_last must be None (disable), -1 (keep all), or a positive integer.")
+
+    cwd = Path.cwd()
+    pbc_pdb = cwd / "pbc.pdb"
+    pbc_xtc = cwd / "pbc.xtc"
+    if not (pbc_pdb.exists() and pbc_xtc.exists()):
+        return None
+
+    existing = list_iterations(cwd)
+    next_idx = (int(_ITER_RE.match(existing[-1].name).group(1)) + 1) if existing else 0
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    iter_dir = cwd / f"iter_{next_idx}_{stamp}"
+    iter_dir.mkdir()
+
+    shutil.copy2(pbc_pdb, iter_dir / "pbc.pdb")
+    shutil.copy2(pbc_xtc, iter_dir / "pbc.xtc")
+
+    for itp in cwd.glob(itp_glob):
+        shutil.copy2(itp, iter_dir / itp.name)
+
+    if mapping is not None:
+        with open(iter_dir / "mapping.json", "w") as f:
+            json.dump(mapping, f, indent=2)
+
+    if keep_last != -1:
+        all_iters = list_iterations(cwd)
+        n_to_delete = max(0, len(all_iters) - keep_last)
+        for old_dir in all_iters[:n_to_delete]:
+            shutil.rmtree(old_dir)
+
+    return iter_dir

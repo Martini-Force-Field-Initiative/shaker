@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import matplotlib as mpl
 import matplotlib.patches as mpatches
-import matplotlib.lines as mlines
 import warnings
 from scipy.stats import wasserstein_distance
 
@@ -20,21 +19,31 @@ except AttributeError:
     _trapz = np.trapz
 
 def plot_sasa_dir(root="./SASA",
-                  xvg="resarea_SASA.xvg"):
+                  xvg="SASA.xvg",
+                  kind="violin"):
     '''
     Plot SASA values from multiple simulations stored in subdirectories.
 
-    This function scans the specified directory for subdirectories containing
-    a SASA results file (e.g. `resarea_SASA.xvg`). Each subdirectory is assumed
-    to represent a different model or simulation condition. The SASA values
-    and associated errors are extracted and displayed as a bar plot for
-    comparison.
+    This function scans the specified directory for subdirectories
+    containing a per-frame SASA time series (`xvg`, written by `run_SASA`
+    via `gmx sasa -o`). Each subdirectory is assumed to represent a
+    different model or simulation condition. Mean and std (used for the
+    returned summary values) are computed from this same per-frame data
+    for every `kind`, so both chart styles — and the numbers returned
+    alongside them — are derived the same way.
+
+    Two chart styles are available via `kind`:
+
+    - "violin" (default) — a violin per subdirectory, showing the full
+      per-frame spread rather than just mean ± std.
+    - "overlay" — per-frame SASA distributions overlaid as density curves
+      (same visual style as `plot_bonded_distributions`).
 
     If a subdirectory named "AA" is present, coloured background bands are
     drawn to indicate the percentage deviation from the AA reference value:
-    green (0–5 %), orange (5–10 %), and red (>10 %, extending to zero).
-    A dashed horizontal line marks the AA reference value. A legend is added
-    explaining the colour coding.
+    green (0-5 %), orange (5-10 %), and red (>10 %). A dashed line marks the
+    AA reference value. For "violin" this is horizontal (SASA is the
+    y-axis); for "overlay" it's vertical (SASA is the x-axis there).
 
     Parameters
     ----------
@@ -42,49 +51,74 @@ def plot_sasa_dir(root="./SASA",
         Directory containing subdirectories with SASA output files.
         Default is "./SASA".
     xvg : str, optional
-        Name of the GROMACS `.xvg` file containing SASA values within each
-        subdirectory. Default is "resarea_SASA.xvg".
+        Name of the per-frame GROMACS `.xvg` file (`gmx sasa -o`) within
+        each subdirectory. Default is "SASA.xvg".
+    kind : {"violin", "overlay"}, optional
+        Chart style, see above. Default is "violin".
 
     Returns
     -------
     fig : matplotlib.figure.Figure
         The generated figure.
     ax : matplotlib.axes.Axes
-        The axes containing the bar plot.
+        The axes containing the plot.
     items : list of tuple
-        List containing the parsed SASA data in the form
-        `(name, value, error)` for each subdirectory.
+        `(name, value, error)` per subdirectory — mean and std SASA over
+        all frames, sorted by subdirectory name.
 
     Notes
     -----
-    The function expects each subdirectory inside `root` to contain the
-    specified `.xvg` file. The label used in the bar plot corresponds to
-    the name of the subdirectory.
-
-    The y-axis runs from 0 to 10 % above the largest value + error across
-    all datasets.
-
     The resulting figure is saved as `SASABar.png`.
     '''
+    if kind not in ("violin", "overlay"):
+        raise ValueError("kind must be 'violin' or 'overlay'")
+
     root = Path(root)
-    items = [(d.name, *_read_SASA_xvg(d / xvg))
-             for d in sorted(root.iterdir())
-             if d.is_dir() and (d / xvg).exists()]
-    names, vals, errs = zip(*items)
+
+    if kind == "overlay":
+        return _plot_sasa_overlay(root, xvg)
+    return _plot_sasa_violin(root, xvg)
+
+
+def _plot_sasa_violin(root, xvg):
+    '''
+    Plot SASA as a violin chart, one column per subdirectory in `root`.
+    See `plot_sasa_dir` (kind="violin").
+    '''
+    entries = [(d.name, _read_SASA_timeseries(d / xvg))
+              for d in sorted(root.iterdir())
+              if d.is_dir() and (d / xvg).exists()]
+    if not entries:
+        raise ValueError(f"No '{xvg}' files found under {root}")
+
+    names = [name for name, _ in entries]
+    distributions = [dist for _, dist in entries]
+    vals = [dist.mean() for dist in distributions]
+    errs = [dist.std() for dist in distributions]
+    items = list(zip(names, vals, errs))
     x = np.arange(len(names))
 
     fig, ax = plt.subplots(
         figsize=(max(6, 0.8 * len(names)), 4),
         tight_layout=True)
 
-    # y-axis limits
-    y_max = max(v + e for v, e in zip(vals, errs))
-    ax.set_ylim(0, y_max * 1.10)
-
-    # AA reference bands
+    # AA reference value, used both for the deviation bands below and as
+    # the center of the y-axis window.
     aa_val = None
     if "AA" in names:
         aa_val = vals[names.index("AA")]
+
+    # y-axis limits: default to mean ± 12.5 % around the AA reference (a
+    # little past the outermost ">10 %" deviation band), but widen to the
+    # actual data range if any distribution extends beyond that window,
+    # so nothing gets clipped.
+    ref_mean = aa_val if aa_val is not None else float(np.mean(vals))
+    window = ref_mean * 0.125
+    dist_min = min(dist.min() for dist in distributions)
+    dist_max = max(dist.max() for dist in distributions)
+    y_min = min(ref_mean - window, dist_min)
+    y_top = max(ref_mean + window, dist_max)
+    ax.set_ylim(y_min, y_top)
 
     legend_patches = []
     if aa_val is not None:
@@ -95,9 +129,9 @@ def plot_sasa_dir(root="./SASA",
         ]
         for lo, hi, color, label in bands:
             if hi is None:
-                ax.axhspan(0, aa_val * (1 - lo),
+                ax.axhspan(y_min, aa_val * (1 - lo),
                            color=color, alpha=0.15, zorder=0)
-                ax.axhspan(aa_val * (1 + lo), y_max * 1.10,
+                ax.axhspan(aa_val * (1 + lo), y_top,
                            color=color, alpha=0.15, zorder=0)
             else:
                 ax.axhspan(aa_val * (1 - hi), aa_val * (1 - lo),
@@ -109,31 +143,144 @@ def plot_sasa_dir(root="./SASA",
                 mpatches.Patch(facecolor=color, alpha=0.4,
                                edgecolor="none", label=label))
 
+        # The dashed line's meaning is self-evident (it sits on the AA
+        # violin), so it doesn't get its own legend entry.
         ax.axhline(aa_val, color="dimgrey", lw=1.2,
                    ls="--", zorder=1, alpha=0.7)
-        legend_patches.insert(0,
-            mlines.Line2D([], [], color="dimgrey", lw=1.2,
-                          ls="--", alpha=0.7, label="AA reference"))
 
-    # bars
-    ax.bar(x, vals,
-           yerr=errs,
-           capsize=7,
-           error_kw=dict(elinewidth=1.8, ecolor="dimgrey", capthick=1.8),
-           color="#888888",
-           edgecolor="#bbbbbb",
-           linewidth=1.2,
-           zorder=2)
+    parts = ax.violinplot(distributions, positions=x,
+                          showmeans=True, showextrema=True, widths=0.7)
+    for body in parts["bodies"]:
+        body.set_facecolor("#888888")
+        body.set_edgecolor("#555555")
+        body.set_alpha(0.7)
+        body.set_zorder(2)
+    for key in ("cbars", "cmins", "cmaxes", "cmeans"):
+        parts[key].set_color("dimgrey")
+        parts[key].set_zorder(2)
+    for key in ("cmins", "cmaxes", "cmeans"):
+        # Shrink the mean/min/max horizontal markers to half their
+        # default width (which otherwise spans the full violin) so
+        # they read as tick marks rather than bars.
+        segments = []
+        for (x0, y0), (x1, y1) in parts[key].get_segments():
+            xc = (x0 + x1) / 2
+            half = (x1 - x0) / 4
+            segments.append([(xc - half, y0), (xc + half, y1)])
+        parts[key].set_segments(segments)
 
     ax.set_xticks(x)
     ax.set_xticklabels(names, rotation=30, ha="right", fontweight="bold")
     ax.set_ylabel("SASA (nm$^2$)", fontweight="bold")
 
     if legend_patches:
-        ax.legend(handles=legend_patches, loc="lower left",
-                  framealpha=0.8, fontsize=8)
+        ax.legend(handles=legend_patches, loc="lower left", fontsize=8,
+                  labelspacing=0.3, frameon=True, fancybox=True,
+                  edgecolor="none", facecolor="white", framealpha=0.8)
 
     fig.savefig("SASABar.png", dpi=300, transparent=True, bbox_inches="tight")
+    return fig, ax, items
+
+
+_SASA_OVERLAY_COLORS = ["tab:blue", "tab:red", "tab:green", "tab:orange",
+                        "tab:purple", "tab:brown", "tab:pink", "tab:gray",
+                        "tab:olive", "tab:cyan"]
+
+
+def _plot_sasa_overlay(root, xvg, bins=60):
+    '''
+    Plot per-frame SASA distributions for every subdirectory in `root` as
+    overlaid density curves, in the same visual style as
+    `plot_bonded_distributions`. See `plot_sasa_dir` (kind="overlay").
+    '''
+    entries = [(d.name, _read_SASA_timeseries(d / xvg))
+               for d in sorted(root.iterdir())
+               if d.is_dir() and (d / xvg).exists()]
+    if not entries:
+        raise ValueError(f"No '{xvg}' files found under {root}")
+
+    names = [name for name, _ in entries]
+    means = {name: vals.mean() for name, vals in entries}
+    all_vals = np.concatenate([vals for _, vals in entries])
+    bin_edges = np.linspace(all_vals.min(), all_vals.max(), bins + 1)
+    bin_centers = (bin_edges[1:] + bin_edges[:-1]) / 2
+
+    hists = {name: np.histogram(vals, bins=bin_edges, density=True)[0]
+             for name, vals in entries}
+
+    ref_name = "AA" if "AA" in hists else names[0]
+    ref_hist = hists[ref_name]
+
+    # Reference (AA, if present) always gets tab:blue and the first
+    # comparison dataset tab:red, matching plot_bonded_distributions'
+    # convention, rather than whatever order subdirectories sort in.
+    plot_order = [ref_name] + [n for n in names if n != ref_name]
+    colors = {name: _SASA_OVERLAY_COLORS[i % len(_SASA_OVERLAY_COLORS)]
+             for i, name in enumerate(plot_order)}
+
+    # x-axis limits: default to mean ± 12.5 % around the reference (AA, or
+    # the first dataset if there's no AA), widened to the actual data range
+    # if any distribution extends beyond that window, so nothing is clipped.
+    ref_mean = means[ref_name]
+    window = ref_mean * 0.125
+    x_min = min(ref_mean - window, all_vals.min())
+    x_max = max(ref_mean + window, all_vals.max())
+
+    fig, ax = plt.subplots(figsize=(6, 4), tight_layout=True)
+
+    # AA reference bands, same deviation thresholds as plot_sasa_dir's
+    # bar/violin charts, just as vertical spans since SASA is the x-axis
+    # here instead of the y-axis.
+    aa_val = means.get("AA")
+    legend_patches = []
+    if aa_val is not None:
+        bands = [
+            (0.00, 0.05, "#2ecc71", "0–5 % from AA"),
+            (0.05, 0.10, "#e67e22", "5–10 % from AA"),
+            (0.10, None, "#e74c3c", ">10 % from AA"),
+        ]
+        for lo, hi, color, label in bands:
+            if hi is None:
+                ax.axvspan(x_min, aa_val * (1 - lo),
+                          color=color, alpha=0.15, zorder=0)
+                ax.axvspan(aa_val * (1 + lo), x_max,
+                          color=color, alpha=0.15, zorder=0)
+            else:
+                ax.axvspan(aa_val * (1 - hi), aa_val * (1 - lo),
+                          color=color, alpha=0.15, zorder=0)
+                ax.axvspan(aa_val * (1 + lo), aa_val * (1 + hi),
+                          color=color, alpha=0.15, zorder=0)
+
+            legend_patches.append(
+                mpatches.Patch(facecolor=color, alpha=0.4,
+                               edgecolor="none", label=label))
+
+        # The dashed line's meaning is self-evident (it sits on the AA
+        # curve), so it doesn't get its own legend entry.
+        ax.axvline(aa_val, color="dimgrey", lw=1.2,
+                  ls="--", zorder=1, alpha=0.7)
+
+    curve_handles = ax.plot(bin_centers, ref_hist, label=ref_name,
+                            color=colors[ref_name], zorder=2)
+
+    for name in names:
+        if name == ref_name:
+            continue
+        hist, color = hists[name], colors[name]
+        curve_handles += ax.plot(bin_centers, hist, label=name, color=color, zorder=2)
+
+    ax.set_xlim(x_min, x_max)
+    ax.set_xlabel("SASA (nm$^2$)", fontweight="bold")
+    ax.set_ylabel("Prob. density", fontweight="bold")
+
+    ax.legend(handles=curve_handles + legend_patches,
+             loc="upper left", fontsize=8, ncols=2, labelspacing=0.3,
+             columnspacing=1.0, frameon=True, fancybox=True, edgecolor="none",
+             facecolor="white", framealpha=0.8)
+
+    fig.savefig("SASABar.png", dpi=300, transparent=True, bbox_inches="tight")
+
+    items = [(name, float(means[name]), float(vals.std())) for name, vals in entries]
     return fig, ax, items
 
 
@@ -348,12 +495,13 @@ def plot_bonded_distributions(*bonded_dicts,
                 if metrics:
                     overlap_y = np.minimum(ref_hist, hist)
 
-                    # Shade the overlapping region
+                    # Shade the overlapping region (kept out of the legend —
+                    # it's visually self-evident, and an entry per comparison
+                    # dataset would make the legend grow unboundedly).
                     ax.fill_between(
                         ref_bins, overlap_y,
                         alpha=0.15,
                         color=color,
-                        label=f"Overlap {labels[0]}∩{label}",
                     )
 
                     # Wasserstein distance
@@ -377,7 +525,7 @@ def plot_bonded_distributions(*bonded_dicts,
             # Annotate metrics in the upper-right corner, one text call per line
             # so each comparison carries its own colour.
             if metrics and metrics_lines:
-                line_height = 0.08
+                line_height = 0.10
                 for k, (line, line_color) in enumerate(metrics_lines):
                     ax.text(
                         0.98, 0.95 - k * line_height,
@@ -387,8 +535,7 @@ def plot_bonded_distributions(*bonded_dicts,
                         va="top", ha="right",
                         family="monospace",
                         color=line_color,
-                        bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.6, lw=0)
-                              if k == 0 else None,
+                        bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8, lw=0),
                     )
 
             # --- axis limits ---
@@ -399,7 +546,9 @@ def plot_bonded_distributions(*bonded_dicts,
             ax.set_xlim(xlim_map[cat])
 
             ax.set_title("-".join(distribution), fontweight="bold")
-            ax.legend(loc="upper left", frameon=False, fontsize=5, ncols=2)
+            ax.legend(loc="upper left", fontsize=5, ncols=1, labelspacing=0.3,
+                     frameon=True, fancybox=True, edgecolor="none",
+                     facecolor="white", framealpha=0.8)
             ax.set_xlabel(config[cat]["xlabel"], fontsize=9)
             ax.set_ylabel("Prob. density")
 
@@ -411,14 +560,15 @@ def plot_bonded_distributions(*bonded_dicts,
     return fig
 
 
-def _read_SASA_xvg(xvg):
+def _read_SASA_timeseries(xvg):
     '''
-    Reader for the SASA per residue .xvg file. Retrieves AVG and Std.
+    Reader for the SASA-vs-time .xvg file (`gmx sasa -o`). Retrieves the
+    per-frame total SASA values, ignoring the time column.
     '''
     rows = [l.split() for l in Path(xvg).read_text().splitlines()
             if l and l[0] not in "#@"]
     a = np.array(rows, float)
-    return a[0, 1], a[0, 2]
+    return a[:, 1]
 
 
 def _best_grid(n: int):

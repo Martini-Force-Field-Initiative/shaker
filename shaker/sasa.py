@@ -3,8 +3,9 @@
 import MDAnalysis as md
 import warnings
 from importlib.resources import files
-import os 
+import os
 import subprocess
+import shutil
 from .helper import _bead_sizes_dict, _size_from_name, _validate_bead_types
 from pathlib import Path
 
@@ -87,7 +88,7 @@ def run_SASA(name,
         _write_cg_vdw(dir_writing, bead_names, bead_sizes)
     else: # Most likely AA.
         vdwloc = files("shaker.data.vdw") / "vdwradii_AA.dat"
-        subprocess.call(f'cp {vdwloc} {dir_writing}/vdwradii.dat', shell=True)
+        shutil.copy(vdwloc, f'{dir_writing}/vdwradii.dat')
 
     ## Calculate SASA & connoly surface
     env = os.environ.copy()
