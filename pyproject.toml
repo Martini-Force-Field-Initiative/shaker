@@ -50,4 +50,5 @@ shaker = ["data/**/*"]
 [tool.pytest.ini_options]
 filterwarnings = [
   "ignore:pkg_resources is deprecated as an API:UserWarning:nglview",
+  "ignore:Deprecated call to `pkg_resources\\.declare_namespace.*:DeprecationWarning",
 ]
