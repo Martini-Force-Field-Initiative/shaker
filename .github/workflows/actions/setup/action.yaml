@@ -1,3 +1,6 @@
+name: Setup uv
+description: Install and configure uv in a GitHub Actions workflow.
+
 runs:
   using: composite
   steps:
