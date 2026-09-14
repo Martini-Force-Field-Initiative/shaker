@@ -75,6 +75,21 @@ All the tests should pass, if not please open an issue.
 
 ---
 
+## Developer Workflow
+
+Install SHAKER in your environment along with all development dependency groups (lint, typecheck, test, docs):
+```bash
+python -m pip install --group all
+```
+
+Then install the linting/formatting hooks so your changes are checked automatically:
+```bash
+pre-commit install
+```
+This runs `ruff` (lint + format) on staged files at commit time; the same checks also run in CI on every PR.
+
+---
+
 # Typical Workflow
 
 SHAKER is designed for iterative CG parameterization. A typical session in a Jupyter notebook follows these steps:
