@@ -21,9 +21,14 @@ dependencies = [
 "mdanalysis",
 "tqdm",
 "nglview==3.1.4",
-"rdkit",
-"pytest"
+"rdkit"
 ]
+
+[dependency-groups]
+lint_typecheck  = ["ruff", "mypy", "nbqa"]   
+test = ["pytest"]
+docs = ["sphinx", "sphinx-design","pydata-sphinx-theme","numpydoc","myst-nb"]
+
 
 [tool.setuptools]
 include-package-data = true
