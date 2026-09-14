@@ -1,15 +1,17 @@
 """Map AA/QM trajectories to CG representations."""
 
-import MDAnalysis as md
 import warnings
 from pathlib import Path
+
+import MDAnalysis as md
 import numpy as np
 from tqdm.autonotebook import tqdm
 
 from .helper import _BEAD_RATIOS, _size_from_name, _size_label
 
+
 def _write_mapping_report(u, mapping, outdir, outname, verbose=True):
-    '''
+    """
     Write a mapping quality report to a log file.
 
     For each residue in the mapping, reports the number of heavy atoms,
@@ -37,7 +39,7 @@ def _write_mapping_report(u, mapping, outdir, outname, verbose=True):
     verbose : bool, optional
         If ``True`` (default), print the report to the terminal in addition
         to writing it to the log file.
-    '''
+    """
     log_path = outdir / f"{outname}_mapping.log"
 
     lines = []
@@ -58,39 +60,44 @@ def _write_mapping_report(u, mapping, outdir, outname, verbose=True):
         any_typed = any("type" in bead_def for bead_def in beads.values())
 
         if any_typed and not all_typed:
-            missing = [name for name, bead_def in beads.items()
-                       if "type" not in bead_def]
-            lines.append(f"  WARNING: mixed typing for {resname} — "
-                         f"beads missing type: {missing}. "
-                         f"Falling back to unweighted ratio.")
+            missing = [
+                name for name, bead_def in beads.items() if "type" not in bead_def
+            ]
+            lines.append(
+                f"  WARNING: mixed typing for {resname} — "
+                f"beads missing type: {missing}. "
+                f"Falling back to unweighted ratio."
+            )
             lines.append("")
 
         if all_typed:
-            bead_types   = [bead_def["type"] for bead_def in beads.values()]
+            bead_types = [bead_def["type"] for bead_def in beads.values()]
             size_classes = _size_from_name(bead_types)
-            type_counts  = {"R": 0, "S": 0, "T": 0, "U": 0}
+            type_counts = {"R": 0, "S": 0, "T": 0, "U": 0}
             for sc in size_classes:
                 type_counts[sc] += 1
 
-            type_str = (f"[{type_counts['R']} regular, "
-                        f"{type_counts['S']} small, "
-                        f"{type_counts['T']} tiny"
-                        + (f", {type_counts['U']} virtual]"
-                           if type_counts['U'] else "]"))
+            type_str = (
+                f"[{type_counts['R']} regular, "
+                f"{type_counts['S']} small, "
+                f"{type_counts['T']} tiny"
+                + (f", {type_counts['U']} virtual]" if type_counts["U"] else "]")
+            )
 
             expected_heavy = sum(
                 _BEAD_RATIOS.get(_size_label.get(sc, "regular"), 4)
                 for sc in size_classes
-                if sc != "U")
+                if sc != "U"
+            )
             ratio_label = "Bead/atom mismatch (weighted)  "
         else:
-            type_str       = "[bead types not specified]"
+            type_str = "[bead types not specified]"
             expected_heavy = n_beads * 4
-            ratio_label    = "Bead/atom mismatch (unweighted)"
+            ratio_label = "Bead/atom mismatch (unweighted)"
 
         ratio_diff = n_heavy - expected_heavy
-        tolerance  = max(1, round(n_heavy / 10))
-        abs_diff   = abs(ratio_diff)
+        tolerance = max(1, round(n_heavy / 10))
+        abs_diff = abs(ratio_diff)
 
         if abs_diff == 0:
             ratio_status = "OK"
@@ -118,10 +125,10 @@ def _write_mapping_report(u, mapping, outdir, outname, verbose=True):
         print(report_str)
 
 
-def map_aa2cg(gro, xtc, mapping,
-              outname="cg_mapped", outdir=".",
-              report=True, verbose=True):
-    '''
+def map_aa2cg(
+    gro, xtc, mapping, outname="cg_mapped", outdir=".", report=True, verbose=True
+):
+    """
     Map an atomistic trajectory to a coarse-grained representation.
 
     This function constructs coarse-grained beads from atomistic coordinates by
@@ -194,10 +201,10 @@ def map_aa2cg(gro, xtc, mapping,
     - The output structure corresponds to the first frame of the mapped
       trajectory.
     - Atom selections that do not match any atoms will raise a ``ValueError``.
-    '''
+    """
 
-    gro    = Path(gro).resolve()
-    xtc    = Path(xtc).resolve()
+    gro = Path(gro).resolve()
+    xtc = Path(xtc).resolve()
     outdir = Path(outdir).resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -211,9 +218,9 @@ def map_aa2cg(gro, xtc, mapping,
         u = md.Universe(gro, xtc)
 
     # Build bead AtomGroups in the exact order we want
-    bead_agg      = []
-    out_resids    = []
-    out_resnames  = []
+    bead_agg = []
+    out_resids = []
+    out_resnames = []
     out_atomnames = []
 
     for resname, beads in mapping.items():
@@ -226,7 +233,8 @@ def map_aa2cg(gro, xtc, mapping,
                     if len(agg) == 0:
                         raise ValueError(
                             f"Atom '{atom}' not found in resname "
-                            f"'{resname}' (resid {res.resid})")
+                            f"'{resname}' (resid {res.resid})"
+                        )
                     agg_whole += agg
 
                 bead_agg.append(agg_whole)
@@ -236,20 +244,23 @@ def map_aa2cg(gro, xtc, mapping,
 
     n_beads = len(bead_agg)
     if n_beads == 0:
-        raise ValueError("No beads were generated. Check the mapping and residue names.")
+        raise ValueError(
+            "No beads were generated. Check the mapping and residue names."
+        )
 
     # Create an empty CG Universe with n_beads atoms
     cg = md.Universe.empty(
         n_atoms=n_beads,
         n_residues=n_beads,
         atom_resindex=np.arange(n_beads),
-        trajectory=True)
+        trajectory=True,
+    )
 
-    cg.add_TopologyAttr("name",    out_atomnames)
+    cg.add_TopologyAttr("name", out_atomnames)
     cg.add_TopologyAttr("resname", out_resnames)
-    cg.add_TopologyAttr("resid",   out_resids)
+    cg.add_TopologyAttr("resid", out_resids)
 
-    coords  = np.zeros((n_beads, 3), dtype=np.float32)
+    coords = np.zeros((n_beads, 3), dtype=np.float32)
     out_gro = outdir / f"{outname}.gro"
     out_xtc = outdir / f"{outname}.xtc"
 
@@ -273,5 +284,4 @@ def map_aa2cg(gro, xtc, mapping,
                 wrote_gro = True
 
     if report:
-        _write_mapping_report(u, mapping, outdir,
-                              outname, verbose=verbose)
+        _write_mapping_report(u, mapping, outdir, outname, verbose=verbose)

@@ -106,7 +106,8 @@ import MDAnalysis as mda
 u = mda.Universe("cg_mapped.gro", "cg_mapped.xtc")
 
 topology_text = shaker.bonded_estimator(
-    u, resname="MOL",
+    u,
+    resname="MOL",
     dist_tgts=[("B1", "B2"), ("B2", "B3")],
     ang_tgts=[("B1", "B2", "B3")],
 )
@@ -141,22 +142,25 @@ shaker.runSim()
 
 ```python
 u_aa = mda.Universe("cg_mapped.gro", "cg_mapped.xtc")  # reference
-u_cg = mda.Universe("sim.gro", "sim.xtc")               # CG simulation
+u_cg = mda.Universe("sim.gro", "sim.xtc")  # CG simulation
 
 aa_bonded = shaker.measure_bonded_terms(
-    u_aa, resname="MOL",
+    u_aa,
+    resname="MOL",
     dist_tgts=[("B1", "B2"), ("B2", "B3")],
     ang_tgts=[("B1", "B2", "B3")],
 )
 
 cg_bonded = shaker.measure_bonded_terms(
-    u_cg, resname="MOL",
+    u_cg,
+    resname="MOL",
     dist_tgts=[("B1", "B2"), ("B2", "B3")],
     ang_tgts=[("B1", "B2", "B3")],
 )
 
 fig = shaker.plot_bonded_distributions(
-    aa_bonded, cg_bonded,
+    aa_bonded,
+    cg_bonded,
     labels=["AA reference", "CG"],
     colors=["tab:blue", "tab:red"],
 )

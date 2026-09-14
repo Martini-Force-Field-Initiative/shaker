@@ -1,29 +1,34 @@
 """SASA calculation with CG-specific van der Waals radii."""
 
-import MDAnalysis as md
+import os
+import shutil
+import subprocess
 import warnings
 from importlib.resources import files
-import os
-import subprocess
-import shutil
-from .helper import _bead_sizes_dict, _size_from_name, _validate_bead_types
 from pathlib import Path
 
+import MDAnalysis as md
 
-def run_SASA(name, 
-             gro, xtc, 
-             resname, 
-             isCG=False, mapping=None, 
-             dir_out='.', 
-             selection='all',
-             gmx_loc=''):
-    
-    '''
+from .helper import _bead_sizes_dict, _size_from_name, _validate_bead_types
+
+
+def run_SASA(
+    name,
+    gro,
+    xtc,
+    resname,
+    isCG=False,
+    mapping=None,
+    dir_out=".",
+    selection="all",
+    gmx_loc="",
+):
+    """
     This is a wrapper around `gmx sasa` that simplifies SASA analysis for
     both atomistic and coarse-grained systems. For coarse-grained systems,
     a custom van der Waals radii file is generated from the supplied bead
     names and bead types.
-    
+
     Parameters
     ----------
     name : str
@@ -48,29 +53,37 @@ def run_SASA(name,
         Default is "all".
     gmx_loc : str, optional
         Prefix/path to the GROMACS executable directory.
-    
+
     Notes
     -----
     - This function currently analyzes only the first residue matching `resname`.
-    '''
+    """
     ## normalize paths
     gro = Path(gro).resolve()
     xtc = Path(xtc).resolve()
     dir_out = Path(dir_out).resolve()
-    
+
     ## Directory handling.
-    dir_writing = f'{dir_out}/SASA/{name}'
+    dir_writing = f"{dir_out}/SASA/{name}"
     os.makedirs(dir_writing, exist_ok=True)
 
     ## Create index file and run SASA, suppress expected MDAnalysis warnings during the operation.
     with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message=r"Element information is missing", category=UserWarning)
-        warnings.filterwarnings("ignore", message=r"missing dimension", category=UserWarning)
+        warnings.filterwarnings(
+            "ignore", message=r"Element information is missing", category=UserWarning
+        )
+        warnings.filterwarnings(
+            "ignore", message=r"missing dimension", category=UserWarning
+        )
 
         ## Create index file and spit out a gro.
         u = md.Universe(gro, xtc)
-        tgt = u.select_atoms(f'resname {resname}').residues[0].atoms.select_atoms(selection)
-        tgt.write(f"{dir_writing}/index.ndx", mode="w", name='TGT')
+        tgt = (
+            u.select_atoms(f"resname {resname}")
+            .residues[0]
+            .atoms.select_atoms(selection)
+        )
+        tgt.write(f"{dir_writing}/index.ndx", mode="w", name="TGT")
         tgt.atoms.write(f"{dir_writing}/gro.gro")
 
     ## Prepare vdw radii file.
@@ -86,47 +99,82 @@ def run_SASA(name,
         bead_types = [bead["type"] for bead in mapping[resname].values()]
         bead_sizes = _size_from_name(bead_types)
         _write_cg_vdw(dir_writing, bead_names, bead_sizes)
-    else: # Most likely AA.
+    else:  # Most likely AA.
         vdwloc = files("shaker.data.vdw") / "vdwradii_AA.dat"
-        shutil.copy(vdwloc, f'{dir_writing}/vdwradii.dat')
+        shutil.copy(vdwloc, f"{dir_writing}/vdwradii.dat")
 
     ## Calculate SASA & connoly surface
     env = os.environ.copy()
-    env["GMX_MAXBACKUP"] = "-1"   # disable #file.1# backups
+    env["GMX_MAXBACKUP"] = "-1"  # disable #file.1# backups
 
-    cmd1 = [f"{gmx_loc}gmx", "sasa",
-            "-f", xtc, "-s", gro,
-            "-n", "index.ndx",
-            "-ndots", "4800", "-probe", "0.191",
-            "-or", "resarea_SASA.xvg",
-            "-o", "SASA.xvg",
-            "-tv", "vol.xvg",]
+    cmd1 = [
+        f"{gmx_loc}gmx",
+        "sasa",
+        "-f",
+        xtc,
+        "-s",
+        gro,
+        "-n",
+        "index.ndx",
+        "-ndots",
+        "4800",
+        "-probe",
+        "0.191",
+        "-or",
+        "resarea_SASA.xvg",
+        "-o",
+        "SASA.xvg",
+        "-tv",
+        "vol.xvg",
+    ]
 
-    cmd2 = [f"{gmx_loc}gmx", "sasa",
-            "-s", "gro.gro",
-            "-o", "temp.xvg",
-            "-probe", "0.191",
-            "-ndots", "240",
-            "-q", "surface.pdb",]
+    cmd2 = [
+        f"{gmx_loc}gmx",
+        "sasa",
+        "-s",
+        "gro.gro",
+        "-o",
+        "temp.xvg",
+        "-probe",
+        "0.191",
+        "-ndots",
+        "240",
+        "-q",
+        "surface.pdb",
+    ]
 
     logfile = f"{dir_writing}/gmx_sasa.log"
     with open(logfile, "w") as log:
-        subprocess.run(cmd1, input="TGT\n", cwd=dir_writing,
-                       stdout=log, stderr=subprocess.STDOUT,
-                       env=env, text=True, check=True)
+        subprocess.run(
+            cmd1,
+            input="TGT\n",
+            cwd=dir_writing,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            env=env,
+            text=True,
+            check=True,
+        )
 
-        subprocess.run(cmd2, input="System\n", cwd=dir_writing,
-                       stdout=log, stderr=subprocess.STDOUT,
-                       env=env, text=True, check=True)
+        subprocess.run(
+            cmd2,
+            input="System\n",
+            cwd=dir_writing,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            env=env,
+            text=True,
+            check=True,
+        )
 
 
-def _write_cg_vdw (dir_out, bead_names, bead_sizes):
-    '''
+def _write_cg_vdw(dir_out, bead_names, bead_sizes):
+    """
     Write a CG vdwradii.dat file for SASA calculations.
 
     Bead sizes are mapped using `_bead_sizes_dict`. If a bead type is "U",
     its radius is set to 0.
-    '''
+    """
     out = Path(dir_out) / "vdwradii.dat"
     with open(out, "w") as sasa:
         sasa.write("; CG van der Waals radii :)\n")

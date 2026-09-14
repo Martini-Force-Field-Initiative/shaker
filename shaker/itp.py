@@ -4,16 +4,17 @@ from pathlib import Path
 
 from .helper import _validate_bead_types
 
-def write_initial_CGitp (resname, mapping,
-                         filename="initial_CG.itp",
-                         header=None, footer=None):    
+
+def write_initial_CGitp(
+    resname, mapping, filename="initial_CG.itp", header=None, footer=None
+):
     """
     Write an initial CG topology file (.itp).
 
     This function generates a minimal Martini-compatible `.itp` file
     describing a single CG molecule. The topology contains a `[ moleculetype ]`
     section and an `[ atoms ]` section populated from the provided bead
-    definitions. 
+    definitions.
 
     Parameters
     ----------
@@ -50,7 +51,7 @@ def write_initial_CGitp (resname, mapping,
     filename = Path(filename).resolve()
     beads = mapping[resname]
     _validate_bead_types(beads)
-    
+
     def _normalize(x):
         if x is None:
             return []
@@ -60,12 +61,10 @@ def write_initial_CGitp (resname, mapping,
 
     header_lines = _normalize(header)
     footer_lines = _normalize(footer)
-    
-    with open(filename, "w") as f:
 
+    with open(filename, "w") as f:
         # header
-        for line in header_lines:
-            f.write(f"{line}\n")
+        f.writelines(f"{line}\n" for line in header_lines)
         if header_lines:
             f.write("\n")
 
@@ -81,14 +80,17 @@ def write_initial_CGitp (resname, mapping,
             bead_mass = bead_def.get("mass")
 
             if bead_mass is None:
-                f.write(f"{i:4} {bead_type:4} {0:4} {resname:4} {bead_name:4} "
-                        f"{i:4} {bead_charge:6}\n")
+                f.write(
+                    f"{i:4} {bead_type:4} {0:4} {resname:4} {bead_name:4} "
+                    f"{i:4} {bead_charge:6}\n"
+                )
             else:
-                f.write(f"{i:4} {bead_type:4} {0:4} {resname:4} {bead_name:4} "
-                        f"{i:4} {bead_charge:6} {bead_mass:8.1f}\n")
+                f.write(
+                    f"{i:4} {bead_type:4} {0:4} {resname:4} {bead_name:4} "
+                    f"{i:4} {bead_charge:6} {bead_mass:8.1f}\n"
+                )
 
         # footer
         if footer_lines:
             f.write("\n")
-            for line in footer_lines:
-                f.write(f"{line}\n")
+            f.writelines(f"{line}\n" for line in footer_lines)

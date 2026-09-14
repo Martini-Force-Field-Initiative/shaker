@@ -1,39 +1,56 @@
 """Estimate GROMACS bonded parameters from distributions."""
 
-import numpy as np
 import warnings
-from .measurer import measure_bonded_terms
+
+import numpy as np
+
 from .dihedral_fitting import fit_dihedral_workflow
+from .measurer import measure_bonded_terms
 
 _KB = 0.008314462618  # kJ mol⁻¹ K⁻¹
 
 _SECTION_HEADERS = {
     "bonds": (
         ";  i    j  funct   length      force.c. ; beads",
-        ";  i      j    funct   length      force.c."),
+        ";  i      j    funct   length      force.c.",
+    ),
     "constraints": (
         ";  i    j  funct   length                ; beads",
-        ";  i      j    funct   length"),
+        ";  i      j    funct   length",
+    ),
     "angles": (
         ";  i    j    k  funct   angle       force.c. ; beads",
-        ";  i      j      k    funct   angle       force.c."),
+        ";  i      j      k    funct   angle       force.c.",
+    ),
     "proper_dihedrals": (
         ";  i    j    k    l  funct     phase         k     mult ; beads",
-        ";  i      j      k      l    funct     phase         k     mult"),
+        ";  i      j      k      l    funct     phase         k     mult",
+    ),
     "improper_dihedrals": (
         ";  i    j    k    l  funct     angle         k           ; beads",
-        ";  i      j      k      l    funct     angle         k"),
+        ";  i      j      k      l    funct     angle         k",
+    ),
 }
 
 
-def bonded_estimator(universe, resname,
-                     dist_tgts=None, ang_tgts=None,
-                     harm_dihed_tgts=None, imp_dihed_tgts=None, plot_dihed=False,
-                     T=300,
-                     constraint_threshold=25000,
-                     angle_cap=250.0, improper_cap=250.0, res_bend_angle=140.0,
-                     start=0, stop=None, stride=1,
-                     use_indices=False):
+def bonded_estimator(
+    universe,
+    resname,
+    dist_tgts=None,
+    ang_tgts=None,
+    harm_dihed_tgts=None,
+    imp_dihed_tgts=None,
+    plot_dihed=False,
+    T=300,
+    constraint_threshold=25000,
+    angle_cap=250.0,
+    improper_cap=250.0,
+    res_bend_angle=140.0,
+    start=0,
+    stop=None,
+    stride=1,
+    use_indices=False,
+):
     """
     Measure bonded distributions from a mapped reference trajectory and estimate
     initial GROMACS bonded parameters.
@@ -110,31 +127,54 @@ def bonded_estimator(universe, resname,
         bead_index = {atom.name: i + 1 for i, atom in enumerate(residues[0].atoms)}
 
     with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message=r"Reload offsets from trajectory", category=UserWarning)
-        bonded_dist = measure_bonded_terms(universe, resname,
-                                           dist_tgts, ang_tgts, harm_dihed_tgts + imp_dihed_tgts,
-                                           start=start, stop=stop, stride=stride)
+        warnings.filterwarnings(
+            "ignore", message=r"Reload offsets from trajectory", category=UserWarning
+        )
+        bonded_dist = measure_bonded_terms(
+            universe,
+            resname,
+            dist_tgts,
+            ang_tgts,
+            harm_dihed_tgts + imp_dihed_tgts,
+            start=start,
+            stop=stop,
+            stride=stride,
+        )
 
     return _estimate_bonded_from_dict(
         bonded_dist,
         dist_tgts=dist_tgts,
         ang_tgts=ang_tgts,
-        harm_dihed_tgts=harm_dihed_tgts, imp_dihed_tgts=imp_dihed_tgts,
+        harm_dihed_tgts=harm_dihed_tgts,
+        imp_dihed_tgts=imp_dihed_tgts,
         plot_dihed=plot_dihed,
         T=T,
         constraint_threshold=constraint_threshold,
-        angle_cap=angle_cap, improper_cap=improper_cap, res_bend_angle=res_bend_angle,
+        angle_cap=angle_cap,
+        improper_cap=improper_cap,
+        res_bend_angle=res_bend_angle,
         bead_index=bead_index,
-        use_indices=use_indices)
+        use_indices=use_indices,
+    )
 
 
-def _estimate_bonded_from_dict(AA_bonded,
-                               dist_tgts=None, ang_tgts=None,
-                               harm_dihed_tgts=None, imp_dihed_tgts=None, plot_dihed=False,
-                               T=300, dist_units="A", ang_units="deg",
-                               constraint_threshold=25000,
-                               angle_cap=250.0, improper_cap=250.0, res_bend_angle=140.0,
-                               bead_index=None, use_indices=False):
+def _estimate_bonded_from_dict(
+    AA_bonded,
+    dist_tgts=None,
+    ang_tgts=None,
+    harm_dihed_tgts=None,
+    imp_dihed_tgts=None,
+    plot_dihed=False,
+    T=300,
+    dist_units="A",
+    ang_units="deg",
+    constraint_threshold=25000,
+    angle_cap=250.0,
+    improper_cap=250.0,
+    res_bend_angle=140.0,
+    bead_index=None,
+    use_indices=False,
+):
     """
     Estimate initial bonded parameters from measured distributions and return
     GROMACS topology-formatted text.
@@ -219,14 +259,17 @@ def _estimate_bonded_from_dict(AA_bonded,
 
     def _fmt_dihedral(a, b, c, d):
         if use_indices:
-            return (f"{_lookup(a):4d} {_lookup(b):4d} "
-                    f"{_lookup(c):4d} {_lookup(d):4d}"), f"{a}-{b}-{c}-{d}"
+            return (
+                f"{_lookup(a):4d} {_lookup(b):4d} {_lookup(c):4d} {_lookup(d):4d}"
+            ), f"{a}-{b}-{c}-{d}"
         return f"{a:>6} {b:>6} {c:>6} {d:>6}", None
 
     def _get_hist(term_type, tgt):
         targets = [list(t) for t in AA_bonded[term_type]["targets"]]
         if tgt not in targets:
-            raise ValueError(f"Target {tgt} not found in AA_bonded['{term_type}']['targets']")
+            raise ValueError(
+                f"Target {tgt} not found in AA_bonded['{term_type}']['targets']"
+            )
         idx = targets.index(tgt)
         return AA_bonded[term_type]["bins"], AA_bonded[term_type]["hist"][idx]
 
@@ -267,17 +310,19 @@ def _estimate_bonded_from_dict(AA_bonded,
         if k > constraint_threshold:
             line = _build_comment(
                 f"{ij}   1   {r0:8.3f}",
-                comment, f"turned into constraint because k={k:.1f}")
+                comment,
+                f"turned into constraint because k={k:.1f}",
+            )
             constraint_lines.append(line)
         else:
-            line = _build_comment(
-                f"{ij}   1   {r0:8.3f}   {k:10.1f}",
-                comment)
+            line = _build_comment(f"{ij}   1   {r0:8.3f}   {k:10.1f}", comment)
             bond_lines.append(line)
 
     for tgt in ang_tgts:
         bins, hist = _get_hist("angles", tgt)
-        theta0, ktheta = _estimate_angle_params_from_hist(bins, hist, T=T, units=ang_units)
+        theta0, ktheta = _estimate_angle_params_from_hist(
+            bins, hist, T=T, units=ang_units
+        )
         ijk, comment = _fmt_angle(tgt[0], tgt[1], tgt[2])
 
         use_res_bend = theta0 > res_bend_angle and _angle_in_dihedral(tgt)
@@ -291,18 +336,28 @@ def _estimate_bonded_from_dict(AA_bonded,
 
         if use_res_bend:
             k_write = min(ktheta * 1.1, angle_cap)
-            cap_comment = f"capped from k={ktheta:.1f}" if ktheta * 1.1 > angle_cap else None
+            cap_comment = (
+                f"capped from k={ktheta:.1f}" if ktheta * 1.1 > angle_cap else None
+            )
             res_bend_comment = f"angle type set to 10 since θ>{res_bend_angle:.1f} and part of a dihedral, k increased by 10%"
             if theta0 > 150.0:
                 k_write = min(ktheta * 1.1 * 1.2, angle_cap)
-                cap_comment = f"capped from k={ktheta:.1f}" if ktheta * 1.1 * 1.2 > angle_cap else None
+                cap_comment = (
+                    f"capped from k={ktheta:.1f}"
+                    if ktheta * 1.1 * 1.2 > angle_cap
+                    else None
+                )
                 res_bend_comment = f"angle type set to 10 since θ>{res_bend_angle:.1f} and part of a dihedral, k increased by 10%+20%"
                 near_180_comment = f"WARNING: ref angle capped from {theta0:.2f} to 150.00 — angle too close to 180, consider picking a different dihedral"
                 theta0 = 150.0
 
         line = _build_comment(
             f"{ijk}   {angle_type}   {theta0:8.2f}   {k_write:10.1f}",
-            cap_comment, res_bend_comment, near_180_comment, comment)
+            cap_comment,
+            res_bend_comment,
+            near_180_comment,
+            comment,
+        )
         angle_lines.append(line)
 
     for tgt in harm_dihed_tgts:
@@ -311,16 +366,18 @@ def _estimate_bonded_from_dict(AA_bonded,
         model = fit_dihedral_workflow(bins, hist, tgt=tgt, plot=plot_dihed)
 
         harm_dihed_lines.append(f"; {comment or '-'.join(tgt)}")
-        for i, term in enumerate(model['report']):
+        for i, term in enumerate(model["report"]):
             tokens = term.split()
             if len(tokens) < 3:
                 raise ValueError(
-                    f"Unexpected format in dihedral report for {tgt}: {term!r}")
+                    f"Unexpected format in dihedral report for {tgt}: {term!r}"
+                )
             try:
                 phase, k, mult = float(tokens[0]), float(tokens[1]), int(tokens[2])
             except ValueError as e:
                 raise ValueError(
-                    f"Could not parse dihedral report term for {tgt}: {term!r}") from e
+                    f"Could not parse dihedral report term for {tgt}: {term!r}"
+                ) from e
             line = f"{ijkl}   9   {phase:8.2f}   {k:10.4f}   {mult}"
             if i == 0:
                 line = _build_comment(line, comment)
@@ -330,13 +387,15 @@ def _estimate_bonded_from_dict(AA_bonded,
     for tgt in imp_dihed_tgts:
         bins, hist = _get_hist("dihedrals", tgt)
         ijkl, comment = _fmt_dihedral(tgt[0], tgt[1], tgt[2], tgt[3])
-        theta0, ktheta = _estimate_improper_params_from_hist(bins, hist, T=T, units="deg")
+        theta0, ktheta = _estimate_improper_params_from_hist(
+            bins, hist, T=T, units="deg"
+        )
 
         k_write = min(ktheta, improper_cap)
         cap_comment = f"capped from k={ktheta:.4f}" if ktheta > improper_cap else None
         line = _build_comment(
-            f"{ijkl}   2   {theta0:8.2f}   {k_write:10.4f}",
-            cap_comment, comment)
+            f"{ijkl}   2   {theta0:8.2f}   {k_write:10.4f}", cap_comment, comment
+        )
         imp_dihed_lines.append(line)
 
     lines = []
@@ -354,7 +413,11 @@ def _estimate_bonded_from_dict(AA_bonded,
         if harm_dihed_lines:
             lines += [_header("proper_dihedrals")] + harm_dihed_lines
         if imp_dihed_lines:
-            lines += ["; improper dihedrals", _header("improper_dihedrals")] + imp_dihed_lines + [""]
+            lines += (
+                ["; improper dihedrals", _header("improper_dihedrals")]
+                + imp_dihed_lines
+                + [""]
+            )
 
     return "\n".join(lines)
 
@@ -391,12 +454,12 @@ def _estimate_bond_params_from_hist(bins_x, hist, T=300, units="A"):
     p = hist[mask]
 
     r0 = np.sum(x * p) / np.sum(p)
-    var = np.sum(p * (x - r0)**2) / np.sum(p)
+    var = np.sum(p * (x - r0) ** 2) / np.sum(p)
     k = _KB * T / var
 
     if units == "A":
-        r0 = r0 / 10.0    # Å -> nm
-        k = k * 100.0     # kJ/mol/Å² -> kJ/mol/nm²
+        r0 = r0 / 10.0  # Å -> nm
+        k = k * 100.0  # kJ/mol/Å² -> kJ/mol/nm²
     elif units != "nm":
         raise ValueError("units must be 'nm' or 'A'")
 
@@ -440,7 +503,7 @@ def _estimate_angle_params_from_hist(bins_x, hist, T=300, units="deg"):
         raise ValueError("units must be 'deg' or 'rad'")
 
     theta0 = np.sum(x * p) / np.sum(p)
-    var = np.sum(p * (x - theta0)**2) / np.sum(p)
+    var = np.sum(p * (x - theta0) ** 2) / np.sum(p)
     ktheta = _KB * T / var
 
     return np.rad2deg(theta0), ktheta

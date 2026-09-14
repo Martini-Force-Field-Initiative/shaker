@@ -1,11 +1,13 @@
 """Virtual site generation and molecule alignment."""
 
-import numpy as np
+import itertools
+
 import MDAnalysis as md
+import numpy as np
 from MDAnalysis.analysis import align
 from scipy.optimize import lsq_linear
-import itertools
 from tqdm.autonotebook import tqdm
+
 from .helper import _bead_mass_from_type
 
 
@@ -80,8 +82,10 @@ def _resolve_frame_atoms(cgats, frame_names, output):
         if len(matches) == 0:
             raise ValueError(f"No atom named {name!r} found in selection")
         if len(matches) > 1:
-            raise ValueError(f"Atom name {name!r} is not unique in selection "
-                             f"({len(matches)} matches found)")
+            raise ValueError(
+                f"Atom name {name!r} is not unique in selection "
+                f"({len(matches)} matches found)"
+            )
         frame_local_indices.append(index_map[matches.indices[0]])
 
     frame = np.array(frame_local_indices, dtype=int)
@@ -92,9 +96,15 @@ def _resolve_frame_atoms(cgats, frame_names, output):
     return frame, frame_set, frame_pos, frame_labels
 
 
-def _solve_vsiten_weights(A, frame_pos, target, original,
-                           weight_cutoff, reconstruction_cutoff,
-                           atom_name_for_error):
+def _solve_vsiten_weights(
+    A,
+    frame_pos,
+    target,
+    original,
+    weight_cutoff,
+    reconstruction_cutoff,
+    atom_name_for_error,
+):
     """
     Solve for non-negative, normalized center-of-weights coefficients for a
     single virtual site and validate the reconstruction quality.
@@ -141,21 +151,25 @@ def _solve_vsiten_weights(A, frame_pos, target, original,
         raise ValueError(
             f"Atom {atom_name_for_error!r} could not be accurately reconstructed "
             f"from the frame atoms (error={error:.2e} nm). "
-            "Check your frame selection or structure.")
+            "Check your frame selection or structure."
+        )
 
     w_full[w_full < weight_cutoff] = 0.0
     w_full /= w_full.sum()  # renormalize after zeroing
     return w_full
 
 
-def align_mol_to_single_traj(topology, trajectory,
-                             selection="resname MOL",
-                             align_selection="name A B C",
-                             reference_residue=0,
-                             output_xtc="aligned_molecules.xtc",
-                             output_gro="reference_molecule.gro",
-                             return_average=True,
-                             average_gro="average_molecule.gro"):
+def align_mol_to_single_traj(
+    topology,
+    trajectory,
+    selection="resname MOL",
+    align_selection="name A B C",
+    reference_residue=0,
+    output_xtc="aligned_molecules.xtc",
+    output_gro="reference_molecule.gro",
+    return_average=True,
+    average_gro="average_molecule.gro",
+):
     """
     Align N molecules over X frames into a single-molecule trajectory with N*X frames.
 
@@ -192,8 +206,10 @@ def align_mol_to_single_traj(topology, trajectory,
         raise ValueError(f"No residues matched selection: {selection!r}")
 
     if not (0 <= reference_residue < len(residues)):
-        raise ValueError(f"reference_residue={reference_residue} is out of range for "
-                         f"{len(residues)} selected residues.")
+        raise ValueError(
+            f"reference_residue={reference_residue} is out of range for "
+            f"{len(residues)} selected residues."
+        )
 
     # Check that all residues contain the same number of atoms
     n_atoms_ref = len(residues[reference_residue].atoms)
@@ -202,7 +218,8 @@ def align_mol_to_single_traj(topology, trajectory,
             raise ValueError(
                 f"Residue {i} ({res.resname} {res.resid}) has {len(res.atoms)} atoms, "
                 f"but reference residue has {n_atoms_ref}. "
-                "All molecules must have the same number of atoms.")
+                "All molecules must have the same number of atoms."
+            )
 
     # Build reference molecule from the chosen residue
     ref_atoms = residues[reference_residue].atoms
@@ -210,7 +227,9 @@ def align_mol_to_single_traj(topology, trajectory,
     ref_sel = ref.select_atoms(align_selection)
 
     if len(ref_sel) == 0:
-        raise ValueError(f"align_selection {align_selection!r} selected 0 atoms in the reference residue.")
+        raise ValueError(
+            f"align_selection {align_selection!r} selected 0 atoms in the reference residue."
+        )
 
     # Check that alignment selection is valid and consistent across all residues
     for i, res in enumerate(residues):
@@ -219,7 +238,8 @@ def align_mol_to_single_traj(topology, trajectory,
             raise ValueError(
                 f"Residue {i} ({res.resname} {res.resid}) selected {len(mob_sel)} atoms "
                 f"with align_selection, but reference selected {len(ref_sel)}. "
-                "Alignment selection must match across all molecules.")
+                "Alignment selection must match across all molecules."
+            )
 
     # Save the reference molecule structure
     ref.atoms.write(output_gro)
@@ -236,12 +256,15 @@ def align_mol_to_single_traj(topology, trajectory,
     # Load aligned trajectory and compute average structure
     if return_average:
         aligned = md.Universe(output_gro, output_xtc)
-        allpos = np.empty((len(aligned.trajectory), len(aligned.atoms), 3),
-                          dtype=np.float32)
+        allpos = np.empty(
+            (len(aligned.trajectory), len(aligned.atoms), 3), dtype=np.float32
+        )
 
-        for i, ts in tqdm(enumerate(aligned.trajectory),
-                          total=len(aligned.trajectory),
-                          desc="Averaging aligned trajectory"):
+        for i, ts in tqdm(
+            enumerate(aligned.trajectory),
+            total=len(aligned.trajectory),
+            desc="Averaging aligned trajectory",
+        ):
             allpos[i] = aligned.atoms.positions
 
         avg_pos = allpos.mean(axis=0)
@@ -249,10 +272,18 @@ def align_mol_to_single_traj(topology, trajectory,
         aligned.atoms.write(average_gro)
 
 
-def generate_virtual_sites3(universe, frame_names,
-                             selection="all", output="index", c_cutoff=0.1,
-                             include_constraints=True, include_exclusions=True,
-                             mass_split=None, mapping=None, resname=None):
+def generate_virtual_sites3(
+    universe,
+    frame_names,
+    selection="all",
+    output="index",
+    c_cutoff=0.1,
+    include_constraints=True,
+    include_exclusions=True,
+    mass_split=None,
+    mapping=None,
+    resname=None,
+):
     """
     Build GROMACS [constraints], [virtual_sites3], and [exclusions] entries
     from an existing CG structure.
@@ -331,8 +362,7 @@ def generate_virtual_sites3(universe, frame_names,
     if len(frame_names) != 3:
         raise ValueError("frame_names must contain exactly 3 atom names")
 
-    frame, frame_set, _, frame_labels = _resolve_frame_atoms(
-        cgats, frame_names, output)
+    frame, frame_set, _, frame_labels = _resolve_frame_atoms(cgats, frame_names, output)
 
     # Work entirely in nm
     pos = cgats.positions.copy() * 0.1
@@ -345,8 +375,10 @@ def generate_virtual_sites3(universe, frame_names,
     basis = np.vstack((v1, v2, cross))
     det = np.linalg.det(basis)
     if abs(det) < 1e-12:
-        raise ValueError("Chosen frame atoms are collinear or nearly collinear; "
-                         "cannot define a virtual-site basis.")
+        raise ValueError(
+            "Chosen frame atoms are collinear or nearly collinear; "
+            "cannot define a virtual-site basis."
+        )
 
     inv_basis = np.linalg.inv(basis)
     factors = pos @ inv_basis
@@ -358,8 +390,10 @@ def generate_virtual_sites3(universe, frame_names,
         lines.append("[ constraints ]")
         for i, j in itertools.combinations(frame, 2):
             dist_nm = np.linalg.norm(pos[i] - pos[j])
-            lines.append(f"{_atom_label(cgats, i, output):>6} "
-                         f"{_atom_label(cgats, j, output):>6}   1  {dist_nm:.5f}")
+            lines.append(
+                f"{_atom_label(cgats, i, output):>6} "
+                f"{_atom_label(cgats, j, output):>6}   1  {dist_nm:.5f}"
+            )
         lines.append("")
 
     lines.append("[ virtual_sites3 ]")
@@ -369,16 +403,20 @@ def generate_virtual_sites3(universe, frame_names,
 
         a, b, c = factors[i]
         if abs(c) < c_cutoff:
-            lines.append(f"{_atom_label(cgats, i, output):>6}   {frame_txt}   1  {a:.5f}  {b:.5f}")
+            lines.append(
+                f"{_atom_label(cgats, i, output):>6}   {frame_txt}   1  {a:.5f}  {b:.5f}"
+            )
         else:
-            lines.append(f"{_atom_label(cgats, i, output):>6}   {frame_txt}   4  {a:.5f}  {b:.5f}  {c:.5f}")
+            lines.append(
+                f"{_atom_label(cgats, i, output):>6}   {frame_txt}   4  {a:.5f}  {b:.5f}  {c:.5f}"
+            )
     lines.append("")
 
     if include_exclusions:
         lines.append("[ exclusions ]")
         all_labels = [_atom_label(cgats, i, output) for i in range(len(cgats))]
         for i in range(len(all_labels) - 1):
-            lines.append(f"{all_labels[i]:>6}   " + "  ".join(all_labels[i + 1:]))
+            lines.append(f"{all_labels[i]:>6}   " + "  ".join(all_labels[i + 1 :]))
         lines.append("")
 
     if mass_split is not None:
@@ -387,22 +425,31 @@ def generate_virtual_sites3(universe, frame_names,
         if resname is None:
             raise ValueError("resname must be provided when mass_split is used")
 
-        updated_mapping = _add_masses_to_mapping(mapping=mapping, resname=resname,
-                                                 selected_names=list(cgats.names),
-                                                 frame_names=frame_names,
-                                                 mass_split=mass_split)
+        updated_mapping = _add_masses_to_mapping(
+            mapping=mapping,
+            resname=resname,
+            selected_names=list(cgats.names),
+            frame_names=frame_names,
+            mass_split=mass_split,
+        )
         return lines, updated_mapping
     else:
         return lines, None
 
 
-def generate_virtual_sitesN(universe, frame_names,
-                             selection="all", output="index",
-                             include_exclusions=True,
-                             weight_cutoff=1e-6,
-                             reconstruction_cutoff=1e-3,
-                             planar_tolerance=1e-2,
-                             mass_split=None, mapping=None, resname=None):
+def generate_virtual_sitesN(
+    universe,
+    frame_names,
+    selection="all",
+    output="index",
+    include_exclusions=True,
+    weight_cutoff=1e-6,
+    reconstruction_cutoff=1e-3,
+    planar_tolerance=1e-2,
+    mass_split=None,
+    mapping=None,
+    resname=None,
+):
     """
     Build GROMACS [virtual_sitesn] and [exclusions] entries from an existing
     CG structure using a linear combination of N frame atoms with relative
@@ -518,14 +565,14 @@ def generate_virtual_sitesN(universe, frame_names,
         raise ValueError(
             f"frame_names contains {len(frame_names)} atoms, but the system is "
             "underdetermined with more than 4 frame atoms in 3 spatial dimensions "
-            "(at most N-1=3 independent weights can be solved).")
+            "(at most N-1=3 independent weights can be solved)."
+        )
 
     cgats = universe.select_atoms(selection)
     if len(cgats) == 0:
         raise ValueError(f"No atoms matched selection {selection!r}")
 
-    frame, frame_set, _, frame_labels = _resolve_frame_atoms(
-        cgats, frame_names, output)
+    frame, frame_set, _, frame_labels = _resolve_frame_atoms(cgats, frame_names, output)
 
     # Work in nm
     pos = cgats.positions.copy() * 0.1
@@ -550,7 +597,9 @@ def generate_virtual_sitesN(universe, frame_names,
 
     lines = []
     lines.append("[ virtual_sitesn ]")
-    lines.append("; site   funct   constructing_atom_1  weight_1  constructing_atom_2  weight_2 ...")
+    lines.append(
+        "; site   funct   constructing_atom_1  weight_1  constructing_atom_2  weight_2 ..."
+    )
 
     for i in range(len(cgats)):
         if i in frame_set:
@@ -558,18 +607,23 @@ def generate_virtual_sitesN(universe, frame_names,
 
         if apply_projection:
             # Remove out-of-plane noise before solving
-            site_target = pos[i] - np.dot(pos[i] - frame_centroid, plane_normal) * plane_normal
+            site_target = (
+                pos[i] - np.dot(pos[i] - frame_centroid, plane_normal) * plane_normal
+            )
         else:
             site_target = pos[i]
 
         w_full = _solve_vsiten_weights(
-            A, frame_pos, target=site_target, original=pos[i],
+            A,
+            frame_pos,
+            target=site_target,
+            original=pos[i],
             weight_cutoff=weight_cutoff,
             reconstruction_cutoff=reconstruction_cutoff,
-            atom_name_for_error=cgats.names[i])
+            atom_name_for_error=cgats.names[i],
+        )
 
-        pairs_str = "  ".join(f"{lbl}  {w:.5f}"
-                               for lbl, w in zip(frame_labels, w_full))
+        pairs_str = "  ".join(f"{lbl}  {w:.5f}" for lbl, w in zip(frame_labels, w_full))
         lines.append(f"{_atom_label(cgats, i, output):>6}   3   {pairs_str}")
 
     lines.append("")
@@ -578,7 +632,7 @@ def generate_virtual_sitesN(universe, frame_names,
         lines.append("[ exclusions ]")
         all_labels = [_atom_label(cgats, i, output) for i in range(len(cgats))]
         for i in range(len(all_labels) - 1):
-            lines.append(f"{all_labels[i]:>6}   {'  '.join(all_labels[i + 1:])}")
+            lines.append(f"{all_labels[i]:>6}   {'  '.join(all_labels[i + 1 :])}")
         lines.append("")
 
     if mass_split is not None:
@@ -587,10 +641,13 @@ def generate_virtual_sitesN(universe, frame_names,
         if resname is None:
             raise ValueError("resname must be provided when mass_split is used")
 
-        updated_mapping = _add_masses_to_mapping(mapping=mapping, resname=resname,
-                                                 selected_names=list(cgats.names),
-                                                 frame_names=frame_names,
-                                                 mass_split=mass_split)
+        updated_mapping = _add_masses_to_mapping(
+            mapping=mapping,
+            resname=resname,
+            selected_names=list(cgats.names),
+            frame_names=frame_names,
+            mass_split=mass_split,
+        )
         return lines, updated_mapping
     else:
         return lines, None
@@ -631,14 +688,19 @@ def _add_masses_to_mapping(mapping, resname, selected_names, frame_names, mass_s
 
     missing = selected_names - set(bead_map)
     if missing:
-        raise ValueError(f"Selected beads not found in mapping[{resname!r}]: {sorted(missing)}")
+        raise ValueError(
+            f"Selected beads not found in mapping[{resname!r}]: {sorted(missing)}"
+        )
 
     missing_frame = frame_names - selected_names
     if missing_frame:
-        raise ValueError(f"Frame beads must be part of the selection: {sorted(missing_frame)}")
+        raise ValueError(
+            f"Frame beads must be part of the selection: {sorted(missing_frame)}"
+        )
 
-    base_masses = {bead: _bead_mass_from_type(bead_map[bead]["type"])
-                   for bead in selected_names}
+    base_masses = {
+        bead: _bead_mass_from_type(bead_map[bead]["type"]) for bead in selected_names
+    }
 
     if mass_split == "equal":
         total_mass = sum(base_masses.values())

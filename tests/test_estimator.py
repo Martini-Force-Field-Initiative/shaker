@@ -11,14 +11,16 @@ import pytest
 from scipy.stats import norm
 
 from shaker.estimator import (
-    _estimate_bond_params_from_hist,
-    _estimate_angle_params_from_hist,
-    _estimate_improper_params_from_hist,
-    _estimate_bonded_from_dict,
     _KB,
+    _estimate_angle_params_from_hist,
+    _estimate_bond_params_from_hist,
+    _estimate_bonded_from_dict,
+    _estimate_improper_params_from_hist,
 )
 
-_DIHED_BINS = np.arange(-180, 180, 2, dtype=float)  # standard dihedral bin edges → centres
+_DIHED_BINS = np.arange(
+    -180, 180, 2, dtype=float
+)  # standard dihedral bin edges → centres
 
 T = 300
 KT = _KB * T  # ≈ 2.494 kJ/mol
@@ -28,14 +30,23 @@ KT = _KB * T  # ≈ 2.494 kJ/mol
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def gaussian_hist(bins, loc, scale):
     """Normalised Gaussian probability density at given bin centres."""
     return norm.pdf(bins, loc=loc, scale=scale)
 
 
-def _minimal_bonded_dict(dist_bins=None, dist_hist=None, dist_tgts=None,
-                          ang_bins=None,  ang_hist=None,  ang_tgts=None,
-                          dihed_bins=None, dihed_hist=None, dihed_tgts=None):
+def _minimal_bonded_dict(
+    dist_bins=None,
+    dist_hist=None,
+    dist_tgts=None,
+    ang_bins=None,
+    ang_hist=None,
+    ang_tgts=None,
+    dihed_bins=None,
+    dihed_hist=None,
+    dihed_tgts=None,
+):
     """Build the dict that _estimate_bonded_from_dict expects."""
     if dist_bins is None:
         dist_bins, dist_hist, dist_tgts = np.array([]), np.array([[]]), []
@@ -44,9 +55,21 @@ def _minimal_bonded_dict(dist_bins=None, dist_hist=None, dist_tgts=None,
     if dihed_bins is None:
         dihed_bins, dihed_hist, dihed_tgts = np.array([]), np.array([[]]), []
     return {
-        "distances": {"bins": dist_bins,  "hist": np.atleast_2d(dist_hist),  "targets": dist_tgts},
-        "angles":    {"bins": ang_bins,   "hist": np.atleast_2d(ang_hist),   "targets": ang_tgts},
-        "dihedrals": {"bins": dihed_bins, "hist": np.atleast_2d(dihed_hist), "targets": dihed_tgts},
+        "distances": {
+            "bins": dist_bins,
+            "hist": np.atleast_2d(dist_hist),
+            "targets": dist_tgts,
+        },
+        "angles": {
+            "bins": ang_bins,
+            "hist": np.atleast_2d(ang_hist),
+            "targets": ang_tgts,
+        },
+        "dihedrals": {
+            "bins": dihed_bins,
+            "hist": np.atleast_2d(dihed_hist),
+            "targets": dihed_tgts,
+        },
     }
 
 
@@ -60,6 +83,7 @@ def _dihedral_hist(peak_deg=0.0, sigma_deg=30.0):
 # ---------------------------------------------------------------------------
 # Bond parameter estimation
 # ---------------------------------------------------------------------------
+
 
 class TestBondEstimation:
     def test_r0_recovered_angstrom(self):
@@ -89,8 +113,12 @@ class TestBondEstimation:
 
     def test_narrower_distribution_gives_larger_k(self):
         bins = np.linspace(2, 8, 500)
-        _, k_wide   = _estimate_bond_params_from_hist(bins, gaussian_hist(bins, 5.0, 1.0), T=T, units="A")
-        _, k_narrow = _estimate_bond_params_from_hist(bins, gaussian_hist(bins, 5.0, 0.1), T=T, units="A")
+        _, k_wide = _estimate_bond_params_from_hist(
+            bins, gaussian_hist(bins, 5.0, 1.0), T=T, units="A"
+        )
+        _, k_narrow = _estimate_bond_params_from_hist(
+            bins, gaussian_hist(bins, 5.0, 0.1), T=T, units="A"
+        )
         assert k_narrow > k_wide
 
     def test_invalid_units_raises(self):
@@ -103,6 +131,7 @@ class TestBondEstimation:
 # ---------------------------------------------------------------------------
 # Angle parameter estimation
 # ---------------------------------------------------------------------------
+
 
 class TestAngleEstimation:
     def test_theta0_recovered(self):
@@ -129,12 +158,16 @@ class TestAngleEstimation:
     def test_invalid_units_raises(self):
         with pytest.raises(ValueError):
             _estimate_angle_params_from_hist(
-                np.array([90., 120., 150.]), np.array([0.1, 0.8, 0.1]), units="degrees")
+                np.array([90.0, 120.0, 150.0]),
+                np.array([0.1, 0.8, 0.1]),
+                units="degrees",
+            )
 
 
 # ---------------------------------------------------------------------------
 # Improper dihedral parameter estimation
 # ---------------------------------------------------------------------------
+
 
 class TestImproperEstimation:
     def test_standard_peak(self):
@@ -155,8 +188,9 @@ class TestImproperEstimation:
         sigma_deg = 5.0
         bins = np.linspace(-180, 180, 720)
         # Symmetric peak split across the ±180 boundary
-        hist = (gaussian_hist(bins, loc=180.0, scale=sigma_deg) +
-                gaussian_hist(bins, loc=-180.0, scale=sigma_deg))
+        hist = gaussian_hist(bins, loc=180.0, scale=sigma_deg) + gaussian_hist(
+            bins, loc=-180.0, scale=sigma_deg
+        )
         _, k = _estimate_improper_params_from_hist(bins, hist, T=T, units="deg")
         sigma_rad = np.deg2rad(sigma_deg)
         k_expected = KT / sigma_rad**2
@@ -168,34 +202,44 @@ class TestImproperEstimation:
 # Full output formatting via _estimate_bonded_from_dict
 # ---------------------------------------------------------------------------
 
+
 class TestEstimateBondedFromDict:
     def _bond_dict(self, r0_A=5.0, sigma_A=0.5):
         bins = np.linspace(2, 8, 500)
         hist = gaussian_hist(bins, loc=r0_A, scale=sigma_A)
         return _minimal_bonded_dict(
-            dist_bins=bins, dist_hist=hist, dist_tgts=[["B1", "B2"]])
+            dist_bins=bins, dist_hist=hist, dist_tgts=[["B1", "B2"]]
+        )
 
     def _angle_dict(self, theta0=120.0, sigma_deg=10.0):
         bins = np.linspace(60, 180, 500)
         hist = gaussian_hist(bins, loc=theta0, scale=sigma_deg)
         return _minimal_bonded_dict(
-            ang_bins=bins, ang_hist=hist, ang_tgts=[["B1", "B2", "B3"]])
+            ang_bins=bins, ang_hist=hist, ang_tgts=[["B1", "B2", "B3"]]
+        )
 
     def test_bonds_section_present(self):
-        out = _estimate_bonded_from_dict(self._bond_dict(), dist_tgts=[["B1", "B2"]], T=T)
+        out = _estimate_bonded_from_dict(
+            self._bond_dict(), dist_tgts=[["B1", "B2"]], T=T
+        )
         assert "[ bonds ]" in out
 
     def test_angles_section_present(self):
-        out = _estimate_bonded_from_dict(self._angle_dict(), ang_tgts=[["B1", "B2", "B3"]], T=T)
+        out = _estimate_bonded_from_dict(
+            self._angle_dict(), ang_tgts=[["B1", "B2", "B3"]], T=T
+        )
         assert "[ angles ]" in out
 
     def test_constraint_when_k_exceeds_threshold(self):
         """Very narrow bond → huge k → should be written as a constraint."""
         bins = np.linspace(4.8, 5.2, 500)
         hist = gaussian_hist(bins, loc=5.0, scale=0.005)  # σ ≈ 0.0005 nm → huge k
-        d = _minimal_bonded_dict(dist_bins=bins, dist_hist=hist, dist_tgts=[["B1", "B2"]])
-        out = _estimate_bonded_from_dict(d, dist_tgts=[["B1", "B2"]], T=T,
-                                          constraint_threshold=25000)
+        d = _minimal_bonded_dict(
+            dist_bins=bins, dist_hist=hist, dist_tgts=[["B1", "B2"]]
+        )
+        out = _estimate_bonded_from_dict(
+            d, dist_tgts=[["B1", "B2"]], T=T, constraint_threshold=25000
+        )
         assert "[ constraints ]" in out
         assert "[ bonds ]" not in out
 
@@ -203,9 +247,12 @@ class TestEstimateBondedFromDict:
         """Very narrow angle distribution → k capped and 'capped' noted in output."""
         bins = np.linspace(115, 125, 500)
         hist = gaussian_hist(bins, loc=120.0, scale=0.05)  # enormous k
-        d = _minimal_bonded_dict(ang_bins=bins, ang_hist=hist, ang_tgts=[["B1", "B2", "B3"]])
-        out = _estimate_bonded_from_dict(d, ang_tgts=[["B1", "B2", "B3"]], T=T,
-                                          angle_cap=250.0)
+        d = _minimal_bonded_dict(
+            ang_bins=bins, ang_hist=hist, ang_tgts=[["B1", "B2", "B3"]]
+        )
+        out = _estimate_bonded_from_dict(
+            d, ang_tgts=[["B1", "B2", "B3"]], T=T, angle_cap=250.0
+        )
         assert "capped" in out
         assert "250.0" in out
 
@@ -216,7 +263,9 @@ class TestEstimateBondedFromDict:
             _estimate_bonded_from_dict(d, dist_tgts=[["B1", "B99"]], T=T)
 
     def test_bead_names_in_output(self):
-        out = _estimate_bonded_from_dict(self._bond_dict(), dist_tgts=[["B1", "B2"]], T=T)
+        out = _estimate_bonded_from_dict(
+            self._bond_dict(), dist_tgts=[["B1", "B2"]], T=T
+        )
         assert "B1" in out
         assert "B2" in out
 
@@ -230,29 +279,35 @@ class TestEstimateBondedFromDict:
 # Proper dihedral fitting output (harm_dihed_tgts → type 9 lines)
 # ---------------------------------------------------------------------------
 
+
 class TestProperDihedralOutput:
     def _dihed_dict(self, tgt=None):
         tgt = tgt or ["B1", "B2", "B3", "B4"]
         bins, hist = _dihedral_hist(peak_deg=0.0, sigma_deg=30.0)
-        return _minimal_bonded_dict(
-            dihed_bins=bins, dihed_hist=hist, dihed_tgts=[tgt])
+        return _minimal_bonded_dict(dihed_bins=bins, dihed_hist=hist, dihed_tgts=[tgt])
 
     def test_dihedrals_section_present(self):
         d = self._dihed_dict()
-        out = _estimate_bonded_from_dict(d, harm_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T)
+        out = _estimate_bonded_from_dict(
+            d, harm_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T
+        )
         assert "[ dihedrals ]" in out
 
     def test_type_9_lines_present(self):
         """Proper dihedral lines must carry function type 9."""
         d = self._dihed_dict()
-        out = _estimate_bonded_from_dict(d, harm_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T)
+        out = _estimate_bonded_from_dict(
+            d, harm_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T
+        )
         type9_lines = [l for l in out.splitlines() if "   9   " in l]
         assert len(type9_lines) >= 1
 
     def test_type_9_line_format(self):
         """Each type-9 line must have: beads, funct=9, phase, k, mult."""
         d = self._dihed_dict()
-        out = _estimate_bonded_from_dict(d, harm_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T)
+        out = _estimate_bonded_from_dict(
+            d, harm_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T
+        )
         for line in out.splitlines():
             if "   9   " not in line:
                 continue
@@ -261,14 +316,16 @@ class TestProperDihedralOutput:
             # tokens: B1 B2 B3 B4  9  phase  k  mult
             assert len(tokens) == 8
             assert tokens[4] == "9"
-            float(tokens[5])   # phase — must be a float
-            float(tokens[6])   # k     — must be a float
-            int(tokens[7])     # mult  — must be an int
+            float(tokens[5])  # phase — must be a float
+            float(tokens[6])  # k     — must be a float
+            int(tokens[7])  # mult  — must be an int
 
     def test_bead_names_in_comment(self):
         """Bead names should appear in the comment line above the type-9 terms."""
         d = self._dihed_dict()
-        out = _estimate_bonded_from_dict(d, harm_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T)
+        out = _estimate_bonded_from_dict(
+            d, harm_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T
+        )
         comment_lines = [l for l in out.splitlines() if l.strip().startswith(";")]
         joined = " ".join(comment_lines)
         assert "B1" in joined and "B4" in joined
@@ -276,7 +333,9 @@ class TestProperDihedralOutput:
     def test_multiplicity_is_positive_integer(self):
         """Multiplicity on every type-9 line must be a positive integer."""
         d = self._dihed_dict()
-        out = _estimate_bonded_from_dict(d, harm_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T)
+        out = _estimate_bonded_from_dict(
+            d, harm_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T
+        )
         for line in out.splitlines():
             if "   9   " not in line:
                 continue
@@ -286,7 +345,9 @@ class TestProperDihedralOutput:
     def test_amplitude_is_non_negative(self):
         """Force constant k on every type-9 line must be ≥ 0."""
         d = self._dihed_dict()
-        out = _estimate_bonded_from_dict(d, harm_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T)
+        out = _estimate_bonded_from_dict(
+            d, harm_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T
+        )
         for line in out.splitlines():
             if "   9   " not in line:
                 continue
@@ -298,29 +359,35 @@ class TestProperDihedralOutput:
 # Improper dihedral output (imp_dihed_tgts → type 2 lines)
 # ---------------------------------------------------------------------------
 
+
 class TestImproperDihedralOutput:
     def _imp_dict(self, tgt=None):
         tgt = tgt or ["B1", "B2", "B3", "B4"]
         bins, hist = _dihedral_hist(peak_deg=0.0, sigma_deg=15.0)
-        return _minimal_bonded_dict(
-            dihed_bins=bins, dihed_hist=hist, dihed_tgts=[tgt])
+        return _minimal_bonded_dict(dihed_bins=bins, dihed_hist=hist, dihed_tgts=[tgt])
 
     def test_dihedrals_section_present(self):
         d = self._imp_dict()
-        out = _estimate_bonded_from_dict(d, imp_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T)
+        out = _estimate_bonded_from_dict(
+            d, imp_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T
+        )
         assert "[ dihedrals ]" in out
 
     def test_type_2_lines_present(self):
         """Improper dihedral lines must carry function type 2."""
         d = self._imp_dict()
-        out = _estimate_bonded_from_dict(d, imp_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T)
+        out = _estimate_bonded_from_dict(
+            d, imp_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T
+        )
         type2_lines = [l for l in out.splitlines() if "   2   " in l]
         assert len(type2_lines) == 1
 
     def test_type_2_line_format(self):
         """Each type-2 line must have: beads, funct=2, angle, k."""
         d = self._imp_dict()
-        out = _estimate_bonded_from_dict(d, imp_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T)
+        out = _estimate_bonded_from_dict(
+            d, imp_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T
+        )
         for line in out.splitlines():
             if "   2   " not in line:
                 continue
@@ -328,13 +395,15 @@ class TestImproperDihedralOutput:
             # tokens: B1 B2 B3 B4  2  angle  k
             assert len(tokens) == 7
             assert tokens[4] == "2"
-            float(tokens[5])   # equilibrium angle
-            float(tokens[6])   # force constant
+            float(tokens[5])  # equilibrium angle
+            float(tokens[6])  # force constant
 
     def test_equilibrium_angle_near_peak(self):
         """Improper equilibrium angle should be near the histogram peak (0°)."""
         d = self._imp_dict()
-        out = _estimate_bonded_from_dict(d, imp_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T)
+        out = _estimate_bonded_from_dict(
+            d, imp_dihed_tgts=[["B1", "B2", "B3", "B4"]], T=T
+        )
         for line in out.splitlines():
             if "   2   " not in line:
                 continue

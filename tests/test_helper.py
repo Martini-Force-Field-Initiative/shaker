@@ -1,12 +1,13 @@
 """Tests for shaker/helper.py — pure bead classification utilities."""
 
 import pytest
+
 from shaker.helper import (
-    _size_from_name,
-    _bead_mass_from_type,
-    _bead_sizes_dict,
-    _bead_masses_dict,
     _BEAD_RATIOS,
+    _bead_mass_from_type,
+    _bead_masses_dict,
+    _bead_sizes_dict,
+    _size_from_name,
     _valid_martini_bead_types,
     _validate_bead_types,
 )
@@ -28,7 +29,7 @@ class TestSizeFromName:
         assert _size_from_name(["TP1"]) == ["T"]
 
     def test_virtual_bead(self):
-        # Virtual beads are identified by a leading 'U' 
+        # Virtual beads are identified by a leading 'U'
         assert _size_from_name(["U1"]) == ["U"]
         assert _size_from_name(["u2"]) == ["U"]
 

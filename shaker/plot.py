@@ -1,13 +1,14 @@
 """Publication-quality distribution and SASA plots."""
 
 import math
+import warnings
 from pathlib import Path
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
+
 import matplotlib as mpl
 import matplotlib.patches as mpatches
-import warnings
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib import gridspec
 from scipy.stats import wasserstein_distance
 
 mpl.rcParams['figure.dpi'] = 150
@@ -535,7 +536,7 @@ def plot_bonded_distributions(*bonded_dicts,
                         va="top", ha="right",
                         family="monospace",
                         color=line_color,
-                        bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8, lw=0),
+                        bbox={'boxstyle': "round,pad=0.3", 'fc': "white", 'alpha': 0.8, 'lw': 0},
                     )
 
             # --- axis limits ---

@@ -1,6 +1,6 @@
+import MDAnalysis as mda
 import numpy as np
 import pytest
-import MDAnalysis as mda
 
 
 def make_universe(positions, names, resname="MOL", resid=1):
@@ -12,9 +12,9 @@ def make_universe(positions, names, resname="MOL", resid=1):
         atom_resindex=np.zeros(n, dtype=int),
         trajectory=True,
     )
-    u.add_TopologyAttr("name",    names)
+    u.add_TopologyAttr("name", names)
     u.add_TopologyAttr("resname", [resname])
-    u.add_TopologyAttr("resid",   [resid])
+    u.add_TopologyAttr("resid", [resid])
     u.atoms.positions = np.array(positions, dtype=np.float32)
     return u
 
