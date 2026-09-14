@@ -28,6 +28,11 @@ dependencies = [
 lint_typecheck  = ["ruff", "mypy", "nbqa"]   
 test = ["pytest"]
 docs = ["sphinx", "sphinx-design","pydata-sphinx-theme","numpydoc","myst-nb"]
+all = [
+      { include-group = "lint_typecheck" },
+      { include-group = "test" },
+      { include-group = "docs" }
+      ]
 
 
 [tool.setuptools]
