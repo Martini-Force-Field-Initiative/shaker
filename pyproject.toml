@@ -25,11 +25,13 @@ dependencies = [
 ]
 
 [dependency-groups]
-lint_typecheck  = ["ruff", "mypy", "nbqa"]   
+lint = ["ruff", "nbqa"]
+typecheck = ["mypy", "types-tqdm", "scipy-stubs"]
 test = ["pytest"]
 docs = ["sphinx", "sphinx-design","pydata-sphinx-theme","numpydoc","myst-nb"]
 all = [
-      { include-group = "lint_typecheck" },
+      { include-group = "lint" },
+      { include-group = "typecheck" },
       { include-group = "test" },
       { include-group = "docs" }
       ]
@@ -50,5 +52,13 @@ shaker = ["data/**/*"]
 [tool.pytest.ini_options]
 filterwarnings = [
   "ignore:pkg_resources is deprecated as an API:UserWarning:nglview",
-  "ignore:Deprecated call to `pkg_resources\\.declare_namespace.*:DeprecationWarning",
 ]
+
+[[tool.mypy.overrides]]
+module = [
+  "MDAnalysis",
+  "MDAnalysis.analysis",
+  "MDAnalysis.analysis.distances",
+  "nglview"
+]
+ignore_missing_imports = true

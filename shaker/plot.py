@@ -17,7 +17,7 @@ mpl.rcParams["figure.dpi"] = 150
 try:
     _trapz = np.trapezoid
 except AttributeError:
-    _trapz = np.trapz
+    _trapz = np.trapz  # type: ignore[attr-defined]
 
 
 def plot_sasa_dir(root="./SASA", xvg="SASA.xvg", kind="violin"):
