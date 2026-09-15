@@ -20,7 +20,7 @@ dependencies = [
 "scipy",
 "mdanalysis",
 "tqdm",
-"nglview==3.1.4",
+"nglview==4.0.1",
 "rdkit"
 ]
 
