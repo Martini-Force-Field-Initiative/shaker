@@ -1,10 +1,12 @@
 """Inverted Boltzmann dihedral fitting with cosine series."""
 
-import numpy as np
-import matplotlib.pyplot as plt
-from itertools import combinations
 import warnings
+from itertools import combinations
 from math import factorial
+
+import matplotlib.pyplot as plt
+import numpy as np
+
 
 ###
 ### Helpers
@@ -12,18 +14,20 @@ def _harm_design_matrix(bins, mults):
     th = np.deg2rad(bins)
     cols = [np.ones_like(th)]
     for n in mults:
-        cols.append(np.cos(n*th))
-        cols.append(np.sin(n*th))
+        cols.append(np.cos(n * th))
+        cols.append(np.sin(n * th))
     return np.column_stack(cols)
 
+
 def _aic(rss, k, N):
-    return N*np.log(rss / max(N,1)) + 2*k
+    return N * np.log(rss / max(N, 1)) + 2 * k
+
 
 def _bic(rss, k, N):
-    return N*np.log(rss / max(N,1)) + k*np.log(max(N,1))
+    return N * np.log(rss / max(N, 1)) + k * np.log(max(N, 1))
 
-def _make_weights(y, weight_mode="boltzmann", weights=None,
-                  w_temp_kj=2.5):
+
+def _make_weights(y, weight_mode="boltzmann", weights=None, w_temp_kj=2.5):
     """
     Build a normalised weight array emphasising low-energy points.
 
@@ -62,17 +66,25 @@ def _make_weights(y, weight_mode="boltzmann", weights=None,
         elif weight_mode in (None, "none"):
             w = np.ones_like(y)
         else:
-            raise ValueError("weight_mode must be 'boltzmann', 'none', or provide `weights`.")
+            raise ValueError(
+                "weight_mode must be 'boltzmann', 'none', or provide `weights`."
+            )
     w = np.where(np.isfinite(w) & (w > 0), w, 0.0)
     total = np.sum(w)
     return w * (len(w) / total) if total > 0 else np.ones_like(y)
 
 
 ### InvBoltz and Savitzky
-def inverted_boltzmann(data_density, kcal=False, temp=298,
-                       interpolate=False, penalty=0.0,
-                       interp_method="linear", zero_min=True):
-    '''
+def inverted_boltzmann(
+    data_density,
+    kcal=False,
+    temp=298,
+    interpolate=False,
+    penalty=0.0,
+    interp_method="linear",
+    zero_min=True,
+):
+    """
     Convert a density histogram to a PMF via -kT ln P(θ).
 
     Parameters
@@ -96,8 +108,8 @@ def inverted_boltzmann(data_density, kcal=False, temp=298,
     -------
     np.ndarray
         PMF in kJ/mol (or kcal/mol) at each bin.
-    '''
-    
+    """
+
     data_density = data_density / np.sum(data_density, axis=0)
 
     with warnings.catch_warnings():
@@ -117,9 +129,14 @@ def inverted_boltzmann(data_density, kcal=False, temp=298,
         if np.any(mask) and np.any(~mask):
             if interp_method == "cubic":
                 from scipy.interpolate import CubicSpline
-                data_energy[mask] = CubicSpline(x[~mask], data_energy[~mask])(x[mask]) + penalty
+
+                data_energy[mask] = (
+                    CubicSpline(x[~mask], data_energy[~mask])(x[mask]) + penalty
+                )
             else:
-                data_energy[mask] = np.interp(x[mask], x[~mask], data_energy[~mask]) + penalty
+                data_energy[mask] = (
+                    np.interp(x[mask], x[~mask], data_energy[~mask]) + penalty
+                )
 
     if zero_min:
         min_val = np.nanmin(data_energy)
@@ -189,7 +206,7 @@ def savitzky_golay(y, window_size, order, deriv=0, rate=1):
        W.H. Press, S.A. Teukolsky, W.T. Vetterling, B.P. Flannery
        Cambridge University Press ISBN-13: 9780521880688
     """
-    
+
     try:
         window_size = np.abs(int(window_size))
         order = np.abs(int(order))
@@ -199,27 +216,39 @@ def savitzky_golay(y, window_size, order, deriv=0, rate=1):
         raise TypeError("window_size size must be a positive odd number")
     if window_size < order + 2:
         raise TypeError("window_size is too small for the polynomials order")
-    order_range = range(order+1)
-    half_window = (window_size -1) // 2
+    order_range = range(order + 1)
+    half_window = (window_size - 1) // 2
     # precompute coefficients
-    b = np.array([[k**i for i in order_range]
-        for k in range(-half_window, half_window+1)])
+    b = np.array(
+        [[k**i for i in order_range] for k in range(-half_window, half_window + 1)]
+    )
     m = np.linalg.pinv(b)[deriv] * rate**deriv * factorial(deriv)
     # pad the signal at the extremes with
     # values taken from the signal itself
-    firstvals = y[0] - np.abs( y[1:half_window+1][::-1] - y[0] )
-    lastvals = y[-1] + np.abs(y[-half_window-1:-1][::-1] - y[-1])
+    firstvals = y[0] - np.abs(y[1 : half_window + 1][::-1] - y[0])
+    lastvals = y[-1] + np.abs(y[-half_window - 1 : -1][::-1] - y[-1])
     y = np.concatenate((firstvals, y, lastvals))
-    return np.convolve( m[::-1], y, mode='valid')
+    return np.convolve(m[::-1], y, mode="valid")
 
 
 ### Periodic dihedral angle fitting.
-def fit_dihedral_workflow(bins, hist, tgt=None,
-                          interpolate=True, penalty=2.0, interp_method="linear",
-                          sg_window=11, sg_order=2,
-                          max_terms=5, max_multiplicity=5,
-                          criterion="BIC", weight_mode="boltzmann", weights=None,
-                          w_temp_kj=2.5, plot=False):    
+def fit_dihedral_workflow(
+    bins,
+    hist,
+    tgt=None,
+    interpolate=True,
+    penalty=2.0,
+    interp_method="linear",
+    sg_window=11,
+    sg_order=2,
+    max_terms=5,
+    max_multiplicity=5,
+    criterion="BIC",
+    weight_mode="boltzmann",
+    weights=None,
+    w_temp_kj=2.5,
+    plot=False,
+):
     """
     Full dihedral fitting workflow: inverted Boltzmann → smooth → fit → report.
 
@@ -264,33 +293,38 @@ def fit_dihedral_workflow(bins, hist, tgt=None,
             "smooth_potential" — Savitzky-Golay smoothed PMF
     """
 
-    potential        = inverted_boltzmann(hist, interpolate=interpolate,
-                                          penalty=penalty, interp_method=interp_method)
+    potential = inverted_boltzmann(
+        hist, interpolate=interpolate, penalty=penalty, interp_method=interp_method
+    )
     smooth_potential = savitzky_golay(potential, sg_window, sg_order)
-    
-    model            = fit_periodic_harmonics(bins, smooth_potential,
-                                              max_terms=max_terms,
-                                              max_multiplicity=max_multiplicity,
-                                              criterion=criterion,
-                                              weight_mode=weight_mode,
-                                              weights=weights,
-                                              w_temp_kj=w_temp_kj)
-    model["potential"]        = potential
+
+    model = fit_periodic_harmonics(
+        bins,
+        smooth_potential,
+        max_terms=max_terms,
+        max_multiplicity=max_multiplicity,
+        criterion=criterion,
+        weight_mode=weight_mode,
+        weights=weights,
+        w_temp_kj=w_temp_kj,
+    )
+    model["potential"] = potential
     model["smooth_potential"] = smooth_potential
-    model["report"] = report_potentials(model, bins=bins, energy_kj=smooth_potential, return_pots=True)
+    model["report"] = report_potentials(
+        model, bins=bins, energy_kj=smooth_potential, return_pots=True
+    )
 
     if plot:
-
         fit_data = evaluate_model(bins, model)
-        title = '-'.join(tgt) if tgt is not None else "Dihedral fit"
+        title = "-".join(tgt) if tgt is not None else "Dihedral fit"
         fig, ax = plt.subplots(1, 1, figsize=(6, 3))
-        ax.plot(bins, potential,        color='k', lw=1, alpha=0.5, label='Raw potential')
-        ax.plot(bins, smooth_potential, color='k', lw=2, alpha=1.0, label='Smoothed')
-        ax.plot(bins, fit_data,         color='tab:red', lw=2, alpha=1.0, label='Fit')
+        ax.plot(bins, potential, color="k", lw=1, alpha=0.5, label="Raw potential")
+        ax.plot(bins, smooth_potential, color="k", lw=2, alpha=1.0, label="Smoothed")
+        ax.plot(bins, fit_data, color="tab:red", lw=2, alpha=1.0, label="Fit")
         ax.legend(frameon=False)
-        ax.set_title(title, fontweight='bold')
-        ax.set_ylabel('Potential (kJ/mol)', fontweight='bold')
-        ax.set_xlabel('Dihedral angle (°)', fontweight='bold')
+        ax.set_title(title, fontweight="bold")
+        ax.set_ylabel("Potential (kJ/mol)", fontweight="bold")
+        ax.set_xlabel("Dihedral angle (°)", fontweight="bold")
         ax.set_xlim(-180, 180)
         fig.tight_layout()
         plt.show()
@@ -301,13 +335,18 @@ def fit_dihedral_workflow(bins, hist, tgt=None,
 
     return model
 
+
 def fit_periodic_harmonics(
-    bins, energy_kj,
-    max_terms=4, max_multiplicity=4,
-    criterion="BIC", zero_min=True, 
-    weight_mode="boltzmann", weights=None,
-    w_temp_kj=2.5):
-    
+    bins,
+    energy_kj,
+    max_terms=4,
+    max_multiplicity=4,
+    criterion="BIC",
+    zero_min=True,
+    weight_mode="boltzmann",
+    weights=None,
+    w_temp_kj=2.5,
+):
     """
     Fit a dihedral potential energy surface to a sum of periodic harmonics.
 
@@ -394,7 +433,7 @@ def fit_periodic_harmonics(
         weights_summary : dict
             Records the weighting parameters used.
     """
-    
+
     bins = np.asarray(bins)
     energy_kj = np.asarray(energy_kj)
 
@@ -405,14 +444,17 @@ def fit_periodic_harmonics(
     N = len(y)
 
     # Build weights
-    w_input = np.asarray(weights)[msk] if (weights is not None 
-                                           and len(np.asarray(weights)) == len(energy_kj)) else weights
+    w_input = (
+        np.asarray(weights)[msk]
+        if (weights is not None and len(np.asarray(weights)) == len(energy_kj))
+        else weights
+    )
     w = _make_weights(y, weight_mode=weight_mode, weights=w_input, w_temp_kj=w_temp_kj)
     sqrtw = np.sqrt(w)
-    all_mults = list(range(1, max_multiplicity+1))
+    all_mults = list(range(1, max_multiplicity + 1))
     best = None
 
-    for r in range(1, max_terms+1):
+    for r in range(1, max_terms + 1):
         for mults in combinations(all_mults, r):
             X = _harm_design_matrix(x, mults)
             # Weighted least squares: solve (W^{1/2} X) beta ≈ (W^{1/2} y)
@@ -423,27 +465,35 @@ def fit_periodic_harmonics(
             resid = y - X @ beta
             rss_w = np.sum(w * resid**2)  # weighted RSS
             k_params = X.shape[1]
-            score = _aic(rss_w, k_params, N) if criterion.upper()=="AIC" else _bic(rss_w, k_params, N)
+            score = (
+                _aic(rss_w, k_params, N)
+                if criterion.upper() == "AIC"
+                else _bic(rss_w, k_params, N)
+            )
 
             if (best is None) or (score < best["score"]):
                 c0 = beta[0]
                 a_b = beta[1:]
                 amps, phases = [], []
                 for i in range(len(mults)):
-                    a = a_b[2*i]; b = a_b[2*i+1]
+                    a = a_b[2 * i]
+                    b = a_b[2 * i + 1]
                     A = np.hypot(a, b)
                     delta = np.degrees(np.arctan2(b, a))
-                    amps.append(A); phases.append(delta)
-                best = {"mults": mults,
-                        "beta": beta,
-                        "c0": c0,
-                        "amps": np.array(amps),
-                        "phases_deg": np.array(phases),
-                        "offset_1pluscos": c0 - np.sum(amps),  # before zeroing min
-                        "rss_w": rss_w,
-                        "score": score,
-                        "criterion": criterion.upper(),
-                        "weights_summary": dict(mode=weight_mode, Tw=w_temp_kj)}
+                    amps.append(A)
+                    phases.append(delta)
+                best = {
+                    "mults": mults,
+                    "beta": beta,
+                    "c0": c0,
+                    "amps": np.array(amps),
+                    "phases_deg": np.array(phases),
+                    "offset_1pluscos": c0 - np.sum(amps),  # before zeroing min
+                    "rss_w": rss_w,
+                    "score": score,
+                    "criterion": criterion.upper(),
+                    "weights_summary": {"mode": weight_mode, "Tw": w_temp_kj},
+                }
 
     # Enforce global min = 0 by adjusting constant
     if zero_min and best is not None:
@@ -451,7 +501,7 @@ def fit_periodic_harmonics(
         th = np.deg2rad(theta_grid)
         g = np.zeros_like(th, dtype=float)
         for n, k, ddeg in zip(best["mults"], best["amps"], best["phases_deg"]):
-            g += k * (1.0 + np.cos(n*th - np.deg2rad(ddeg)))
+            g += k * (1.0 + np.cos(n * th - np.deg2rad(ddeg)))
         c_zero = -np.min(g)
         best["offset_1pluscos"] = c_zero
 
@@ -481,8 +531,16 @@ def evaluate_model(bins, model):
     return y
 
 
-def report_potentials(best, bins=None, energy_kj=None, weights=None,
-                      phase_range="-180_180", sort_by="multiplicity", decimals=3, return_pots=False):
+def report_potentials(
+    best,
+    bins=None,
+    energy_kj=None,
+    weights=None,
+    phase_range="-180_180",
+    sort_by="multiplicity",
+    decimals=3,
+    return_pots=False,
+):
     """
     Format each fitted term as: refdegree, k, multiplicity.
 
@@ -495,8 +553,8 @@ def report_potentials(best, bins=None, energy_kj=None, weights=None,
     If `weights` is provided, computes weighted RMSE instead.
     """
     mults = best["mults"]
-    ks = best["amps"]               # k in kJ/mol
-    phases = best["phases_deg"]     # δ in degrees
+    ks = best["amps"]  # k in kJ/mol
+    phases = best["phases_deg"]  # δ in degrees
 
     # normalize phase to the requested range
     def norm_phase(d):
@@ -516,12 +574,12 @@ def report_potentials(best, bins=None, energy_kj=None, weights=None,
         rows.sort(key=lambda r: r[1], reverse=True)
     elif sort_by == "refdegree":
         rows.sort(key=lambda r: r[0])
-    
+
     # build lines
     lines = []
     for refdeg, k, n in rows:
         lines.append(f"{refdeg:.{decimals}f} {k:.{decimals}f} {n}")
-    
+
     # RMSE (unweighted or weighted) calculations.
     if bins is not None and energy_kj is not None:
         yhat = evaluate_model(bins, best)
@@ -529,21 +587,25 @@ def report_potentials(best, bins=None, energy_kj=None, weights=None,
         res = y - yhat
         pot_e = float(np.sum(ks))  # Σ k
         pot_e = pot_e if np.isfinite(pot_e) and pot_e > 0 else None
-    
+
         if weights is not None:
             w = np.asarray(weights, dtype=float)
             w = np.where(np.isfinite(w) & (w > 0), w, 0.0)
-            rmse = float(np.sqrt(np.sum(w * res**2) / np.sum(w))) if np.any(w) else float(np.sqrt(np.mean(res**2)))
+            rmse = (
+                float(np.sqrt(np.sum(w * res**2) / np.sum(w)))
+                if np.any(w)
+                else float(np.sqrt(np.mean(res**2)))
+            )
             tag = " (weighted)" if np.any(w) else ""
         else:
             rmse = float(np.sqrt(np.mean(res**2)))
             tag = ""
-            
+
         suffix = f"; RMSE {rmse:.3f} kJ/mol{tag}"
-    
+
         if pot_e:
-            suffix += f" ({rmse/pot_e:.3f} RMSE/POT_E)"
-    
+            suffix += f" ({rmse / pot_e:.3f} RMSE/POT_E)"
+
         if len(lines) == 0:
             lines.append(suffix.lstrip("; ").strip())
         else:

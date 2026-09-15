@@ -1,18 +1,15 @@
 """3D visualization of atomistic and coarse-grained trajectories via nglview."""
 
-from pathlib import Path
 import warnings
-
-import nglview as nv
-import numpy as np
+from pathlib import Path
 
 import MDAnalysis as md
+import nglview as nv
+import numpy as np
 from MDAnalysis.analysis import align
 
 
-def render_mapping(cg_mapped_gro, cg_mapped_xtc,
-                   aa_gro, aa_xtc,
-                   size='900px'):
+def render_mapping(cg_mapped_gro, cg_mapped_xtc, aa_gro, aa_xtc, size="900px"):
     """
     Render an overlay of an atomistic trajectory and its coarse-grained mapping.
 
@@ -69,7 +66,9 @@ def render_mapping(cg_mapped_gro, cg_mapped_xtc,
     view[1].clear_representations()
 
     view[0].add_representation("ball+stick", selection="NOT DOT")
-    view[1].add_representation("spacefill", selection="NOT DOT", opacity=1.0, radius=.9)
+    view[1].add_representation(
+        "spacefill", selection="NOT DOT", opacity=1.0, radius=0.9
+    )
 
     view.center()
     view._set_size(size, size)
@@ -79,8 +78,9 @@ def render_mapping(cg_mapped_gro, cg_mapped_xtc,
     return view
 
 
-def render_connely_surface(SASA_folder='./SASA', aa_subfolder='AA',
-                           cg_subfolder='CG_Mapped', size='900px'):
+def render_connely_surface(
+    SASA_folder="./SASA", aa_subfolder="AA", cg_subfolder="CG_Mapped", size="900px"
+):
     """
     Render overlapping Connolly (SASA) surfaces for atomistic and coarse-grained models.
 
@@ -126,8 +126,8 @@ def render_connely_surface(SASA_folder='./SASA', aa_subfolder='AA',
     """
 
     SASA_folder = Path(SASA_folder).resolve()
-    aa_surface  = str(SASA_folder / aa_subfolder / "surface.pdb")
-    cg_surface  = str(SASA_folder / cg_subfolder / "surface.pdb")
+    aa_surface = str(SASA_folder / aa_subfolder / "surface.pdb")
+    cg_surface = str(SASA_folder / cg_subfolder / "surface.pdb")
 
     view = nv.NGLWidget()
 
@@ -139,20 +139,14 @@ def render_connely_surface(SASA_folder='./SASA', aa_subfolder='AA',
 
     view[0].add_representation("ball+stick", selection="NOT DOT")
     view[0].add_representation(
-        "spacefill",
-        selection="DOT",
-        radius=0.11,
-        opacity=0.35,
-        color="blue"
+        "spacefill", selection="DOT", radius=0.11, opacity=0.35, color="blue"
     )
 
-    view[1].add_representation("spacefill", selection="NOT DOT", opacity=1.0, radius=.9)
     view[1].add_representation(
-        "spacefill",
-        selection="DOT",
-        radius=0.11,
-        opacity=0.45,
-        color="red"
+        "spacefill", selection="NOT DOT", opacity=1.0, radius=0.9
+    )
+    view[1].add_representation(
+        "spacefill", selection="DOT", radius=0.11, opacity=0.45, color="red"
     )
 
     view.center()
@@ -162,7 +156,9 @@ def render_connely_surface(SASA_folder='./SASA', aa_subfolder='AA',
     return view
 
 
-def render_ensemble(gro, xtc, sel="all", render_sel="all", step=None, n_frames=None, size="400px"):
+def render_ensemble(
+    gro, xtc, sel="all", render_sel="all", step=None, n_frames=None, size="400px"
+):
     """
     Visualize an aligned ensemble of trajectory frames simultaneously.
 
@@ -197,12 +193,12 @@ def render_ensemble(gro, xtc, sel="all", render_sel="all", step=None, n_frames=N
     gro = Path(gro).resolve()
     xtc = Path(xtc).resolve()
 
-    u   = md.Universe(str(gro), str(xtc))
+    u = md.Universe(str(gro), str(xtc))
     ref = md.Universe(str(gro))
 
     align.AlignTraj(u, ref, select=sel, in_memory=True).run()
 
-    ag        = u.select_atoms(sel)
+    ag = u.select_atoms(sel)
     render_ag = u.select_atoms(render_sel)
 
     if step is None and n_frames is None:

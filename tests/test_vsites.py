@@ -7,18 +7,18 @@ virtual-site weights are exact and easy to predict by hand. Alignment tests
 use small multi-residue GRO/XTC fixtures written to tmp_path.
 """
 
-import os
+from typing import ClassVar
 
+import MDAnalysis as mda
 import numpy as np
 import pytest
-import MDAnalysis as mda
-
 from conftest import make_universe
+
 from shaker.vsites import (
+    _add_masses_to_mapping,
     _atom_label,
     _resolve_frame_atoms,
     _solve_vsiten_weights,
-    _add_masses_to_mapping,
     align_mol_to_single_traj,
     generate_virtual_sites3,
     generate_virtual_sitesN,
@@ -44,9 +44,12 @@ pytestmark = [
 # Helpers for multi-residue GRO/XTC fixtures (align_mol_to_single_traj tests)
 # ---------------------------------------------------------------------------
 
+
 def _gro_line(resid, resname, name, index, pos):
-    return (f"{resid:>5}{resname:<5}{name:>5}{index:>5}"
-            f"{pos[0]:>8.3f}{pos[1]:>8.3f}{pos[2]:>8.3f}\n")
+    return (
+        f"{resid:>5}{resname:<5}{name:>5}{index:>5}"
+        f"{pos[0]:>8.3f}{pos[1]:>8.3f}{pos[2]:>8.3f}\n"
+    )
 
 
 def _write_gro(path, atoms):
@@ -75,20 +78,28 @@ def two_residue_gro_xtc(tmp_path):
     90 deg about z, to exercise the per-residue alignment.
     """
     names = ["A", "B", "C"]
-    ref_tri = np.array([[0., 0., 0.], [10., 0., 0.], [0., 10., 0.]], dtype=np.float32)
-    translate = np.array([50., 0., 0.], dtype=np.float32)
+    ref_tri = np.array(
+        [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0]], dtype=np.float32
+    )
+    translate = np.array([50.0, 0.0, 0.0], dtype=np.float32)
 
     frame1 = np.vstack([ref_tri, ref_tri + translate])
 
     theta = np.pi / 2
-    rot = np.array([[np.cos(theta), -np.sin(theta), 0],
-                     [np.sin(theta), np.cos(theta), 0],
-                     [0, 0, 1]], dtype=np.float32)
+    rot = np.array(
+        [
+            [np.cos(theta), -np.sin(theta), 0],
+            [np.sin(theta), np.cos(theta), 0],
+            [0, 0, 1],
+        ],
+        dtype=np.float32,
+    )
     res2_rotated = ref_tri @ rot.T + translate
     frame2 = np.vstack([ref_tri, res2_rotated])
 
     u = mda.Universe.empty(
-        n_atoms=6, n_residues=2,
+        n_atoms=6,
+        n_residues=2,
         atom_resindex=np.repeat([0, 1], 3),
         trajectory=True,
     )
@@ -110,11 +121,11 @@ def two_residue_gro_xtc(tmp_path):
 def mismatched_atom_count_gro_xtc(tmp_path):
     """Residue 1 has 3 atoms (A,B,C), residue 2 has only 2 (A,B)."""
     atoms = [
-        (1, "MOL", "A", (0., 0., 0.)),
-        (1, "MOL", "B", (1., 0., 0.)),
-        (1, "MOL", "C", (0., 1., 0.)),
-        (2, "MOL", "A", (5., 0., 0.)),
-        (2, "MOL", "B", (6., 0., 0.)),
+        (1, "MOL", "A", (0.0, 0.0, 0.0)),
+        (1, "MOL", "B", (1.0, 0.0, 0.0)),
+        (1, "MOL", "C", (0.0, 1.0, 0.0)),
+        (2, "MOL", "A", (5.0, 0.0, 0.0)),
+        (2, "MOL", "B", (6.0, 0.0, 0.0)),
     ]
     gro = tmp_path / "mismatch.gro"
     _write_gro(gro, atoms)
@@ -129,12 +140,12 @@ def mismatched_atom_count_gro_xtc(tmp_path):
 def mismatched_align_selection_gro_xtc(tmp_path):
     """Same atom count (3) per residue, but residue 2 has D instead of C."""
     atoms = [
-        (1, "MOL", "A", (0., 0., 0.)),
-        (1, "MOL", "B", (1., 0., 0.)),
-        (1, "MOL", "C", (0., 1., 0.)),
-        (2, "MOL", "A", (5., 0., 0.)),
-        (2, "MOL", "B", (6., 0., 0.)),
-        (2, "MOL", "D", (5., 1., 0.)),
+        (1, "MOL", "A", (0.0, 0.0, 0.0)),
+        (1, "MOL", "B", (1.0, 0.0, 0.0)),
+        (1, "MOL", "C", (0.0, 1.0, 0.0)),
+        (2, "MOL", "A", (5.0, 0.0, 0.0)),
+        (2, "MOL", "B", (6.0, 0.0, 0.0)),
+        (2, "MOL", "D", (5.0, 1.0, 0.0)),
     ]
     gro = tmp_path / "selmismatch.gro"
     _write_gro(gro, atoms)
@@ -148,6 +159,7 @@ def mismatched_align_selection_gro_xtc(tmp_path):
 # ---------------------------------------------------------------------------
 # _atom_label
 # ---------------------------------------------------------------------------
+
 
 class TestAtomLabel:
     def test_index_output(self):
@@ -170,14 +182,19 @@ class TestAtomLabel:
 # _resolve_frame_atoms
 # ---------------------------------------------------------------------------
 
+
 class TestResolveFrameAtoms:
     def test_resolves_in_requested_order(self):
         u = make_universe([[0, 0, 0], [1, 0, 0], [2, 0, 0]], ["A", "B", "C"])
         frame, frame_set, frame_pos, frame_labels = _resolve_frame_atoms(
-            u.atoms, ["B", "A"], "index")
+            u.atoms, ["B", "A"], "index"
+        )
         assert list(frame) == [1, 0]
         assert frame_set == {0, 1}
-        assert frame_labels == [str(u.atoms.indices[1] + 1), str(u.atoms.indices[0] + 1)]
+        assert frame_labels == [
+            str(u.atoms.indices[1] + 1),
+            str(u.atoms.indices[0] + 1),
+        ]
         assert frame_pos == pytest.approx(np.array([[1, 0, 0], [0, 0, 0]]))
 
     def test_missing_atom_raises(self):
@@ -195,43 +212,63 @@ class TestResolveFrameAtoms:
 # _solve_vsiten_weights
 # ---------------------------------------------------------------------------
 
+
 class TestSolveVsitenWeights:
     def test_exact_line_solution(self):
         """Two frame atoms on a line; target at 30% along → weights [0.7, 0.3]."""
-        frame_pos = np.array([[0., 0, 0], [1., 0, 0]])
+        frame_pos = np.array([[0.0, 0, 0], [1.0, 0, 0]])
         A = np.vstack([frame_pos.T, np.ones(2)])
-        target = np.array([0.3, 0., 0.])
-        w = _solve_vsiten_weights(A, frame_pos, target=target, original=target,
-                                   weight_cutoff=1e-6, reconstruction_cutoff=1e-3,
-                                   atom_name_for_error="V")
+        target = np.array([0.3, 0.0, 0.0])
+        w = _solve_vsiten_weights(
+            A,
+            frame_pos,
+            target=target,
+            original=target,
+            weight_cutoff=1e-6,
+            reconstruction_cutoff=1e-3,
+            atom_name_for_error="V",
+        )
         assert w == pytest.approx([0.7, 0.3], abs=1e-4)
 
     def test_weights_below_cutoff_are_zeroed_and_renormalized(self):
-        frame_pos = np.array([[0., 0, 0], [1., 0, 0], [0., 1, 0]])
+        frame_pos = np.array([[0.0, 0, 0], [1.0, 0, 0], [0.0, 1, 0]])
         A = np.vstack([frame_pos.T, np.ones(3)])
         # Barycentric target: w0=0.3999996, w1=0.6, w2=4e-7 (below default cutoff)
         target = 0.6 * frame_pos[1] + 4e-7 * frame_pos[2]
-        w = _solve_vsiten_weights(A, frame_pos, target=target, original=target,
-                                   weight_cutoff=1e-6, reconstruction_cutoff=1e-3,
-                                   atom_name_for_error="V")
+        w = _solve_vsiten_weights(
+            A,
+            frame_pos,
+            target=target,
+            original=target,
+            weight_cutoff=1e-6,
+            reconstruction_cutoff=1e-3,
+            atom_name_for_error="V",
+        )
         assert w[2] == 0.0
         assert w.sum() == pytest.approx(1.0)
         assert w[1] == pytest.approx(0.6 / (0.6 + 0.3999996), abs=1e-4)
 
     def test_reconstruction_error_raises(self):
         """Frame atoms collinear along x; target has a y-component that can't be reproduced."""
-        frame_pos = np.array([[0., 0, 0], [1., 0, 0]])
+        frame_pos = np.array([[0.0, 0, 0], [1.0, 0, 0]])
         A = np.vstack([frame_pos.T, np.ones(2)])
         original = np.array([0.5, 1.0, 0.0])
         with pytest.raises(ValueError, match="'V1'"):
-            _solve_vsiten_weights(A, frame_pos, target=original, original=original,
-                                   weight_cutoff=1e-6, reconstruction_cutoff=1e-3,
-                                   atom_name_for_error="V1")
+            _solve_vsiten_weights(
+                A,
+                frame_pos,
+                target=original,
+                original=original,
+                weight_cutoff=1e-6,
+                reconstruction_cutoff=1e-3,
+                atom_name_for_error="V1",
+            )
 
 
 # ---------------------------------------------------------------------------
 # generate_virtual_sites3
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateVirtualSites3:
     """
@@ -258,8 +295,9 @@ class TestGenerateVirtualSites3:
 
     def test_c_cutoff_can_force_funct1(self, universe):
         """Raising c_cutoff above |c|=0.5 should switch E to funct 1 as well."""
-        lines, _ = generate_virtual_sites3(universe, ["A", "B", "C"], output="name",
-                                            c_cutoff=0.6)
+        lines, _ = generate_virtual_sites3(
+            universe, ["A", "B", "C"], output="name", c_cutoff=0.6
+        )
         e_line = next(l for l in lines if l.strip().startswith("E"))
         assert "1  0.20000  0.30000" in e_line
 
@@ -270,8 +308,9 @@ class TestGenerateVirtualSites3:
         assert "B      C   1  1.41421" in lines[3]
 
     def test_constraints_omitted_when_disabled(self, universe):
-        lines, _ = generate_virtual_sites3(universe, ["A", "B", "C"], output="name",
-                                            include_constraints=False)
+        lines, _ = generate_virtual_sites3(
+            universe, ["A", "B", "C"], output="name", include_constraints=False
+        )
         assert not any("constraints" in l for l in lines)
 
     def test_exclusions_present_by_default(self, universe):
@@ -279,14 +318,15 @@ class TestGenerateVirtualSites3:
         assert "[ exclusions ]" in lines
 
     def test_exclusions_omitted_when_disabled(self, universe):
-        lines, _ = generate_virtual_sites3(universe, ["A", "B", "C"], output="name",
-                                            include_exclusions=False)
+        lines, _ = generate_virtual_sites3(
+            universe, ["A", "B", "C"], output="name", include_exclusions=False
+        )
         assert not any("exclusions" in l for l in lines)
 
     def test_frame_atoms_excluded_from_virtual_sites_block(self, universe):
         lines, _ = generate_virtual_sites3(universe, ["A", "B", "C"], output="name")
         vsite_start = lines.index("[ virtual_sites3 ]")
-        vsite_block = lines[vsite_start:vsite_start + 3]
+        vsite_block = lines[vsite_start : vsite_start + 3]
         assert not any(l.strip().startswith(("A ", "B ", "C ")) for l in vsite_block)
 
 
@@ -308,7 +348,7 @@ class TestGenerateVirtualSites3Errors:
 
 
 class TestGenerateVirtualSites3MassSplit:
-    MAPPING = {
+    MAPPING: ClassVar = {
         "MOL": {
             "A": {"type": "SC3", "atoms": ["x1"]},
             "B": {"type": "SC3", "atoms": ["x2"]},
@@ -325,18 +365,32 @@ class TestGenerateVirtualSites3MassSplit:
 
     def test_frame_beads_get_equal_share(self, universe):
         import copy
+
         mapping = copy.deepcopy(self.MAPPING)
-        _, updated = generate_virtual_sites3(universe, ["A", "B", "C"], output="name",
-                                              mass_split="equal", mapping=mapping, resname="MOL")
+        _, updated = generate_virtual_sites3(
+            universe,
+            ["A", "B", "C"],
+            output="name",
+            mass_split="equal",
+            mapping=mapping,
+            resname="MOL",
+        )
         total = 3 * 54.0 + 2 * 36.0  # 3 S beads + 2 T beads
         for bead in ("A", "B", "C"):
             assert updated["MOL"][bead]["mass"] == pytest.approx(total / 3)
 
     def test_non_frame_beads_get_zero_mass(self, universe):
         import copy
+
         mapping = copy.deepcopy(self.MAPPING)
-        _, updated = generate_virtual_sites3(universe, ["A", "B", "C"], output="name",
-                                              mass_split="equal", mapping=mapping, resname="MOL")
+        _, updated = generate_virtual_sites3(
+            universe,
+            ["A", "B", "C"],
+            output="name",
+            mass_split="equal",
+            mapping=mapping,
+            resname="MOL",
+        )
         assert updated["MOL"]["D"]["mass"] == 0.0
         assert updated["MOL"]["E"]["mass"] == 0.0
 
@@ -346,20 +400,32 @@ class TestGenerateVirtualSites3MassSplit:
 
     def test_missing_mapping_raises(self, universe):
         with pytest.raises(ValueError, match="mapping must be provided"):
-            generate_virtual_sites3(universe, ["A", "B", "C"], output="name",
-                                     mass_split="equal", resname="MOL")
+            generate_virtual_sites3(
+                universe,
+                ["A", "B", "C"],
+                output="name",
+                mass_split="equal",
+                resname="MOL",
+            )
 
     def test_missing_resname_raises(self, universe):
         import copy
+
         mapping = copy.deepcopy(self.MAPPING)
         with pytest.raises(ValueError, match="resname must be provided"):
-            generate_virtual_sites3(universe, ["A", "B", "C"], output="name",
-                                     mass_split="equal", mapping=mapping)
+            generate_virtual_sites3(
+                universe,
+                ["A", "B", "C"],
+                output="name",
+                mass_split="equal",
+                mapping=mapping,
+            )
 
 
 # ---------------------------------------------------------------------------
 # generate_virtual_sitesN
 # ---------------------------------------------------------------------------
+
 
 class TestGenerateVirtualSitesNErrors:
     def test_too_few_frame_atoms_raises(self):
@@ -407,7 +473,8 @@ class TestGenerateVirtualSitesNThreeFrame:
     def universe(self):
         return make_universe(
             [(0, 0, 0), (10, 0, 0), (0, 10, 0), (10 / 3, 10 / 3, 0)],
-            ["A", "B", "C", "V"])
+            ["A", "B", "C", "V"],
+        )
 
     def test_centroid_gets_equal_weights(self, universe):
         lines, _ = generate_virtual_sitesN(universe, ["A", "B", "C"], output="name")
@@ -419,7 +486,7 @@ class TestGenerateVirtualSitesNThreeFrame:
 class TestGenerateVirtualSitesNFourFrame:
     """Four coplanar frame atoms forming a square in the z=0 plane."""
 
-    SQUARE = [(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0)]
+    SQUARE: ClassVar = [(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0)]
 
     def test_tetrahedral_centroid_gets_equal_weights(self):
         """Non-coplanar (tetrahedral) frame: exact square system, no projection."""
@@ -438,8 +505,7 @@ class TestGenerateVirtualSitesNFourFrame:
         with sane in-plane weights, instead of the unprojected system
         amplifying the noise into a spurious error.
         """
-        u = make_universe(self.SQUARE + [(5, 5, 0.005)],
-                           ["A", "B", "C", "D", "V"])
+        u = make_universe(self.SQUARE + [(5, 5, 0.005)], ["A", "B", "C", "D", "V"])
         lines, _ = generate_virtual_sitesN(u, ["A", "B", "C", "D"], output="name")
         v_line = next(l for l in lines if l.strip().startswith("V"))
         for label in ("A", "B", "C", "D"):
@@ -447,14 +513,13 @@ class TestGenerateVirtualSitesNFourFrame:
 
     def test_coplanar_frame_still_rejects_large_out_of_plane_error(self):
         """V genuinely 0.2 nm off the frame's plane must still raise."""
-        u = make_universe(self.SQUARE + [(5, 5, 2.0)],
-                           ["A", "B", "C", "D", "V"])
+        u = make_universe(self.SQUARE + [(5, 5, 2.0)], ["A", "B", "C", "D", "V"])
         with pytest.raises(ValueError, match="'V'"):
             generate_virtual_sitesN(u, ["A", "B", "C", "D"], output="name")
 
 
 class TestGenerateVirtualSitesNMassSplit:
-    MAPPING = {
+    MAPPING: ClassVar = {
         "MOL": {
             "A": {"type": "SC3", "atoms": ["x1"]},
             "B": {"type": "SC3", "atoms": ["x2"]},
@@ -468,9 +533,16 @@ class TestGenerateVirtualSitesNMassSplit:
 
     def test_frame_beads_get_equal_share(self, universe):
         import copy
+
         mapping = copy.deepcopy(self.MAPPING)
-        _, updated = generate_virtual_sitesN(universe, ["A", "B"], output="name",
-                                              mass_split="equal", mapping=mapping, resname="MOL")
+        _, updated = generate_virtual_sitesN(
+            universe,
+            ["A", "B"],
+            output="name",
+            mass_split="equal",
+            mapping=mapping,
+            resname="MOL",
+        )
         total = 2 * 54.0 + 36.0
         assert updated["MOL"]["A"]["mass"] == pytest.approx(total / 2)
         assert updated["MOL"]["B"]["mass"] == pytest.approx(total / 2)
@@ -485,12 +557,19 @@ class TestGenerateVirtualSitesNMassSplit:
 # _add_masses_to_mapping
 # ---------------------------------------------------------------------------
 
+
 class TestAddMassesToMapping:
     def test_equal_split_among_frame_beads(self):
-        mapping = {"MOL": {
-            "A": {"type": "SC3"}, "B": {"type": "SC3"}, "V": {"type": "TC4"},
-        }}
-        updated = _add_masses_to_mapping(mapping, "MOL", ["A", "B", "V"], ["A", "B"], "equal")
+        mapping = {
+            "MOL": {
+                "A": {"type": "SC3"},
+                "B": {"type": "SC3"},
+                "V": {"type": "TC4"},
+            }
+        }
+        updated = _add_masses_to_mapping(
+            mapping, "MOL", ["A", "B", "V"], ["A", "B"], "equal"
+        )
         total = 54.0 + 54.0 + 36.0
         assert updated["MOL"]["A"]["mass"] == pytest.approx(total / 2)
         assert updated["MOL"]["B"]["mass"] == pytest.approx(total / 2)
@@ -521,24 +600,37 @@ class TestAddMassesToMapping:
 # align_mol_to_single_traj
 # ---------------------------------------------------------------------------
 
+
 class TestAlignMolToSingleTraj:
     def test_output_files_created(self, two_residue_gro_xtc, tmp_path):
         gro, xtc, _ = two_residue_gro_xtc
         out_xtc, out_gro = tmp_path / "aligned.xtc", tmp_path / "ref.gro"
-        align_mol_to_single_traj(gro, xtc, selection="resname MOL",
-                                  align_selection="name A B C",
-                                  output_xtc=str(out_xtc), output_gro=str(out_gro),
-                                  return_average=False)
+        align_mol_to_single_traj(
+            gro,
+            xtc,
+            selection="resname MOL",
+            align_selection="name A B C",
+            output_xtc=str(out_xtc),
+            output_gro=str(out_gro),
+            return_average=False,
+        )
         assert out_xtc.exists()
         assert out_gro.exists()
 
-    def test_one_aligned_frame_per_residue_per_input_frame(self, two_residue_gro_xtc, tmp_path):
+    def test_one_aligned_frame_per_residue_per_input_frame(
+        self, two_residue_gro_xtc, tmp_path
+    ):
         gro, xtc, _ = two_residue_gro_xtc
         out_xtc, out_gro = tmp_path / "aligned.xtc", tmp_path / "ref.gro"
-        align_mol_to_single_traj(gro, xtc, selection="resname MOL",
-                                  align_selection="name A B C",
-                                  output_xtc=str(out_xtc), output_gro=str(out_gro),
-                                  return_average=False)
+        align_mol_to_single_traj(
+            gro,
+            xtc,
+            selection="resname MOL",
+            align_selection="name A B C",
+            output_xtc=str(out_xtc),
+            output_gro=str(out_gro),
+            return_average=False,
+        )
         aligned = mda.Universe(str(out_gro), str(out_xtc))
         # 2 residues x 2 input frames = 4 output frames
         assert len(aligned.trajectory) == 4
@@ -551,10 +643,15 @@ class TestAlignMolToSingleTraj:
         """
         gro, xtc, ref_tri = two_residue_gro_xtc
         out_xtc, out_gro = tmp_path / "aligned.xtc", tmp_path / "ref.gro"
-        align_mol_to_single_traj(gro, xtc, selection="resname MOL",
-                                  align_selection="name A B C",
-                                  output_xtc=str(out_xtc), output_gro=str(out_gro),
-                                  return_average=False)
+        align_mol_to_single_traj(
+            gro,
+            xtc,
+            selection="resname MOL",
+            align_selection="name A B C",
+            output_xtc=str(out_xtc),
+            output_gro=str(out_gro),
+            return_average=False,
+        )
         aligned = mda.Universe(str(out_gro), str(out_xtc))
         for _ in aligned.trajectory:
             assert aligned.atoms.positions == pytest.approx(ref_tri, abs=1e-3)
@@ -563,20 +660,32 @@ class TestAlignMolToSingleTraj:
         gro, xtc, _ = two_residue_gro_xtc
         out_xtc, out_gro = tmp_path / "aligned.xtc", tmp_path / "ref.gro"
         avg_gro = tmp_path / "avg.gro"
-        align_mol_to_single_traj(gro, xtc, selection="resname MOL",
-                                  align_selection="name A B C",
-                                  output_xtc=str(out_xtc), output_gro=str(out_gro),
-                                  return_average=True, average_gro=str(avg_gro))
+        align_mol_to_single_traj(
+            gro,
+            xtc,
+            selection="resname MOL",
+            align_selection="name A B C",
+            output_xtc=str(out_xtc),
+            output_gro=str(out_gro),
+            return_average=True,
+            average_gro=str(avg_gro),
+        )
         assert avg_gro.exists()
 
     def test_average_not_written_when_disabled(self, two_residue_gro_xtc, tmp_path):
         gro, xtc, _ = two_residue_gro_xtc
         out_xtc, out_gro = tmp_path / "aligned.xtc", tmp_path / "ref.gro"
         avg_gro = tmp_path / "avg.gro"
-        align_mol_to_single_traj(gro, xtc, selection="resname MOL",
-                                  align_selection="name A B C",
-                                  output_xtc=str(out_xtc), output_gro=str(out_gro),
-                                  return_average=False, average_gro=str(avg_gro))
+        align_mol_to_single_traj(
+            gro,
+            xtc,
+            selection="resname MOL",
+            align_selection="name A B C",
+            output_xtc=str(out_xtc),
+            output_gro=str(out_gro),
+            return_average=False,
+            average_gro=str(avg_gro),
+        )
         assert not avg_gro.exists()
 
 
@@ -584,46 +693,71 @@ class TestAlignMolToSingleTrajErrors:
     def test_no_residues_matched_raises(self, two_residue_gro_xtc, tmp_path):
         gro, xtc, _ = two_residue_gro_xtc
         with pytest.raises(ValueError, match="No residues matched"):
-            align_mol_to_single_traj(gro, xtc, selection="resname XXX",
-                                      align_selection="name A B C",
-                                      output_xtc=str(tmp_path / "o.xtc"),
-                                      output_gro=str(tmp_path / "o.gro"),
-                                      return_average=False)
+            align_mol_to_single_traj(
+                gro,
+                xtc,
+                selection="resname XXX",
+                align_selection="name A B C",
+                output_xtc=str(tmp_path / "o.xtc"),
+                output_gro=str(tmp_path / "o.gro"),
+                return_average=False,
+            )
 
     def test_reference_residue_out_of_range_raises(self, two_residue_gro_xtc, tmp_path):
         gro, xtc, _ = two_residue_gro_xtc
         with pytest.raises(ValueError, match="out of range"):
-            align_mol_to_single_traj(gro, xtc, selection="resname MOL",
-                                      align_selection="name A B C",
-                                      reference_residue=5,
-                                      output_xtc=str(tmp_path / "o.xtc"),
-                                      output_gro=str(tmp_path / "o.gro"),
-                                      return_average=False)
+            align_mol_to_single_traj(
+                gro,
+                xtc,
+                selection="resname MOL",
+                align_selection="name A B C",
+                reference_residue=5,
+                output_xtc=str(tmp_path / "o.xtc"),
+                output_gro=str(tmp_path / "o.gro"),
+                return_average=False,
+            )
 
-    def test_mismatched_atom_counts_raises(self, mismatched_atom_count_gro_xtc, tmp_path):
+    def test_mismatched_atom_counts_raises(
+        self, mismatched_atom_count_gro_xtc, tmp_path
+    ):
         gro, xtc = mismatched_atom_count_gro_xtc
         with pytest.raises(ValueError, match="must have the same number of atoms"):
-            align_mol_to_single_traj(gro, xtc, selection="resname MOL",
-                                      align_selection="name A B",
-                                      output_xtc=str(tmp_path / "o.xtc"),
-                                      output_gro=str(tmp_path / "o.gro"),
-                                      return_average=False)
+            align_mol_to_single_traj(
+                gro,
+                xtc,
+                selection="resname MOL",
+                align_selection="name A B",
+                output_xtc=str(tmp_path / "o.xtc"),
+                output_gro=str(tmp_path / "o.gro"),
+                return_average=False,
+            )
 
-    def test_empty_align_selection_raises(self, mismatched_align_selection_gro_xtc, tmp_path):
+    def test_empty_align_selection_raises(
+        self, mismatched_align_selection_gro_xtc, tmp_path
+    ):
         gro, xtc = mismatched_align_selection_gro_xtc
         with pytest.raises(ValueError, match="selected 0 atoms"):
-            align_mol_to_single_traj(gro, xtc, selection="resname MOL",
-                                      align_selection="name ZZZZ",
-                                      output_xtc=str(tmp_path / "o.xtc"),
-                                      output_gro=str(tmp_path / "o.gro"),
-                                      return_average=False)
+            align_mol_to_single_traj(
+                gro,
+                xtc,
+                selection="resname MOL",
+                align_selection="name ZZZZ",
+                output_xtc=str(tmp_path / "o.xtc"),
+                output_gro=str(tmp_path / "o.gro"),
+                return_average=False,
+            )
 
     def test_mismatched_align_selection_across_residues_raises(
-            self, mismatched_align_selection_gro_xtc, tmp_path):
+        self, mismatched_align_selection_gro_xtc, tmp_path
+    ):
         gro, xtc = mismatched_align_selection_gro_xtc
         with pytest.raises(ValueError, match="Alignment selection must match"):
-            align_mol_to_single_traj(gro, xtc, selection="resname MOL",
-                                      align_selection="name A B C",
-                                      output_xtc=str(tmp_path / "o.xtc"),
-                                      output_gro=str(tmp_path / "o.gro"),
-                                      return_average=False)
+            align_mol_to_single_traj(
+                gro,
+                xtc,
+                selection="resname MOL",
+                align_selection="name A B C",
+                output_xtc=str(tmp_path / "o.xtc"),
+                output_gro=str(tmp_path / "o.gro"),
+                return_average=False,
+            )

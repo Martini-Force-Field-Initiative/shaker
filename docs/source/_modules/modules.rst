@@ -18,6 +18,7 @@ For a description of the module's functions click on the module's name.
    overlap
    plot
    render
+   render_2d
    sasa
    system_builders
    vsites

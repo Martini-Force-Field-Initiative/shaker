@@ -11,10 +11,10 @@ import numpy as np
 import pytest
 
 from shaker.dihedral_fitting import (
-    inverted_boltzmann,
-    fit_periodic_harmonics,
     evaluate_model,
     fit_dihedral_workflow,
+    fit_periodic_harmonics,
+    inverted_boltzmann,
 )
 
 
@@ -27,6 +27,7 @@ def cosine_potential(bins_deg, mult, k, phase_deg=0.0):
 # ---------------------------------------------------------------------------
 # inverted_boltzmann
 # ---------------------------------------------------------------------------
+
 
 class TestInvertedBoltzmann:
     def test_uniform_density_gives_flat_zero_pmf(self):
@@ -51,8 +52,8 @@ class TestInvertedBoltzmann:
     def test_kcal_vs_kj_ratio(self):
         """kcal=True values should be ~4.184× smaller than kJ/mol values."""
         hist = np.array([0.1, 1.0, 0.1], dtype=float)
-        pmf_kj   = inverted_boltzmann(hist, kcal=False, temp=300)
-        pmf_kcal = inverted_boltzmann(hist, kcal=True,  temp=300)
+        pmf_kj = inverted_boltzmann(hist, kcal=False, temp=300)
+        pmf_kcal = inverted_boltzmann(hist, kcal=True, temp=300)
         mask = np.isfinite(pmf_kj) & (pmf_kj > 1e-6)
         if mask.any():
             ratios = pmf_kj[mask] / pmf_kcal[mask]
@@ -68,13 +69,15 @@ class TestInvertedBoltzmann:
 # fit_periodic_harmonics
 # ---------------------------------------------------------------------------
 
+
 class TestFitPeriodicHarmonics:
     def test_single_term_multiplicity_recovered(self):
         """Fit a single-cosine potential — correct multiplicity must be in the model."""
         bins = np.linspace(-180, 180, 72, endpoint=False)
         potential = cosine_potential(bins, mult=2, k=5.0)
-        model = fit_periodic_harmonics(bins, potential, max_terms=3, max_multiplicity=4,
-                                        weight_mode="none")
+        model = fit_periodic_harmonics(
+            bins, potential, max_terms=3, max_multiplicity=4, weight_mode="none"
+        )
         assert 2 in model["mults"]
 
     def test_single_term_amplitude_recovered(self):
@@ -82,8 +85,9 @@ class TestFitPeriodicHarmonics:
         bins = np.linspace(-180, 180, 72, endpoint=False)
         k_true, mult_true = 4.0, 1
         potential = cosine_potential(bins, mult=mult_true, k=k_true)
-        model = fit_periodic_harmonics(bins, potential, max_terms=2, max_multiplicity=3,
-                                        weight_mode="none")
+        model = fit_periodic_harmonics(
+            bins, potential, max_terms=2, max_multiplicity=3, weight_mode="none"
+        )
         idx = list(model["mults"]).index(mult_true)
         assert model["amps"][idx] == pytest.approx(k_true, rel=0.05)
 
@@ -91,16 +95,23 @@ class TestFitPeriodicHarmonics:
         """evaluate_model on the fitted model should have min ≈ 0."""
         bins = np.linspace(-180, 180, 72, endpoint=False)
         potential = cosine_potential(bins, mult=3, k=2.0, phase_deg=45.0)
-        model = fit_periodic_harmonics(bins, potential, max_terms=3, max_multiplicity=4,
-                                        weight_mode="none", zero_min=True)
+        model = fit_periodic_harmonics(
+            bins,
+            potential,
+            max_terms=3,
+            max_multiplicity=4,
+            weight_mode="none",
+            zero_min=True,
+        )
         reconstructed = evaluate_model(bins, model)
         assert np.min(reconstructed) == pytest.approx(0.0, abs=0.05)
 
     def test_result_keys_present(self):
         bins = np.linspace(-180, 180, 72, endpoint=False)
         potential = cosine_potential(bins, mult=1, k=3.0)
-        model = fit_periodic_harmonics(bins, potential, max_terms=2, max_multiplicity=2,
-                                        weight_mode="none")
+        model = fit_periodic_harmonics(
+            bins, potential, max_terms=2, max_multiplicity=2, weight_mode="none"
+        )
         for key in ("mults", "amps", "phases_deg", "rss_w", "score", "criterion"):
             assert key in model
 
@@ -113,11 +124,25 @@ class TestFitPeriodicHarmonics:
         bins = np.linspace(-180, 180, 72, endpoint=False)
         # Noisy single-term potential — BIC should resist adding extra terms
         rng = np.random.default_rng(0)
-        potential = cosine_potential(bins, mult=1, k=3.0) + rng.normal(0, 0.1, len(bins))
-        model_aic = fit_periodic_harmonics(bins, potential, max_terms=4, max_multiplicity=4,
-                                            criterion="AIC", weight_mode="none")
-        model_bic = fit_periodic_harmonics(bins, potential, max_terms=4, max_multiplicity=4,
-                                            criterion="BIC", weight_mode="none")
+        potential = cosine_potential(bins, mult=1, k=3.0) + rng.normal(
+            0, 0.1, len(bins)
+        )
+        model_aic = fit_periodic_harmonics(
+            bins,
+            potential,
+            max_terms=4,
+            max_multiplicity=4,
+            criterion="AIC",
+            weight_mode="none",
+        )
+        model_bic = fit_periodic_harmonics(
+            bins,
+            potential,
+            max_terms=4,
+            max_multiplicity=4,
+            criterion="BIC",
+            weight_mode="none",
+        )
         assert len(model_bic["mults"]) <= len(model_aic["mults"])
 
 
@@ -125,21 +150,24 @@ class TestFitPeriodicHarmonics:
 # evaluate_model
 # ---------------------------------------------------------------------------
 
+
 class TestEvaluateModel:
     def test_roundtrip_single_term(self):
         """Perfect single-term potential should be reconstructed to within noise."""
         bins = np.linspace(-180, 180, 72, endpoint=False)
         potential = cosine_potential(bins, mult=2, k=3.0)
-        model = fit_periodic_harmonics(bins, potential, max_terms=2, max_multiplicity=3,
-                                        weight_mode="none")
+        model = fit_periodic_harmonics(
+            bins, potential, max_terms=2, max_multiplicity=3, weight_mode="none"
+        )
         reconstructed = evaluate_model(bins, model)
         assert np.allclose(reconstructed, potential, atol=0.2)
 
     def test_output_shape_matches_input(self):
         bins = np.linspace(-180, 180, 72, endpoint=False)
         potential = cosine_potential(bins, mult=1, k=2.0)
-        model = fit_periodic_harmonics(bins, potential, max_terms=1, max_multiplicity=2,
-                                        weight_mode="none")
+        model = fit_periodic_harmonics(
+            bins, potential, max_terms=1, max_multiplicity=2, weight_mode="none"
+        )
         out = evaluate_model(bins, model)
         assert out.shape == bins.shape
 
@@ -147,6 +175,7 @@ class TestEvaluateModel:
 # ---------------------------------------------------------------------------
 # fit_dihedral_workflow (integration)
 # ---------------------------------------------------------------------------
+
 
 class TestFitDihedralWorkflow:
     def test_returns_expected_keys(self):

@@ -27,36 +27,21 @@ It provides modular utilities for mapping atomistic trajectories to CG represent
 Clone the repository
 ```bash
 git clone https://github.com/Lp0lp/shaker.git
-
 ```
-Create a virtual environment with the dependencies (e.g. with **conda**):
-```bash
 cd shaker
-conda env create -f environment-user.yml
-```
-This will create a conda environment with the name shaker-env.
-
-***OR*** with **venv**:
-```bash
-cd shaker
-python3 -m venv shaker-venv
-```
-This will create a venv environment with the name shaker-env.
-
-Then activate your respective environment.
 
 ### Step2:
 
-Install SHAKER with pip:
+Install SHAKER and its dependencies with [uv](https://docs.astral.sh/uv/):
 ```bash
-pip install .
+uv sync --group test
 ```
 
 ### Step3:
 
 Test the package with pytest
 ```bash
-pytest -v tests/
+uv run pytest -v tests/
 ```
 
 All the tests should pass, if not please open an issue.
@@ -72,6 +57,21 @@ All the tests should pass, if not please open an issue.
 - [nglview](https://nglviewer.org/nglview/latest/) (for 3D visualization in notebooks)
 - [tqdm](https://tqdm.github.io/)
 - [GROMACS](https://www.gromacs.org/) (external; required for system setup and SASA)
+
+---
+
+## Developer Workflow
+
+Install SHAKER in your environment along with all development dependency groups (lint, typecheck, test, docs):
+```bash
+uv sync --all-groups
+```
+
+Then install the linting/formatting hooks so your changes are checked automatically:
+```bash
+uv run pre-commit install
+```
+This runs `ruff` (lint + format) on staged files at commit time; the same checks also run in CI on every PR.
 
 ---
 
@@ -106,7 +106,8 @@ import MDAnalysis as mda
 u = mda.Universe("cg_mapped.gro", "cg_mapped.xtc")
 
 topology_text = shaker.bonded_estimator(
-    u, resname="MOL",
+    u,
+    resname="MOL",
     dist_tgts=[("B1", "B2"), ("B2", "B3")],
     ang_tgts=[("B1", "B2", "B3")],
 )
@@ -141,22 +142,25 @@ shaker.runSim()
 
 ```python
 u_aa = mda.Universe("cg_mapped.gro", "cg_mapped.xtc")  # reference
-u_cg = mda.Universe("sim.gro", "sim.xtc")               # CG simulation
+u_cg = mda.Universe("sim.gro", "sim.xtc")  # CG simulation
 
 aa_bonded = shaker.measure_bonded_terms(
-    u_aa, resname="MOL",
+    u_aa,
+    resname="MOL",
     dist_tgts=[("B1", "B2"), ("B2", "B3")],
     ang_tgts=[("B1", "B2", "B3")],
 )
 
 cg_bonded = shaker.measure_bonded_terms(
-    u_cg, resname="MOL",
+    u_cg,
+    resname="MOL",
     dist_tgts=[("B1", "B2"), ("B2", "B3")],
     ang_tgts=[("B1", "B2", "B3")],
 )
 
 fig = shaker.plot_bonded_distributions(
-    aa_bonded, cg_bonded,
+    aa_bonded,
+    cg_bonded,
     labels=["AA reference", "CG"],
     colors=["tab:blue", "tab:red"],
 )

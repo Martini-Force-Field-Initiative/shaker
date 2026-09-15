@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from shaker.system_builders import list_iterations, _checkpoint
+from shaker.system_builders import _checkpoint, list_iterations
 
 
 def _make_cleaned_traj(dir_path, pdb_text="ATOM\n", xtc_text="xtc"):
@@ -21,8 +21,11 @@ class TestListIterations:
         assert list_iterations(tmp_path) == []
 
     def test_finds_and_sorts_by_index(self, tmp_path):
-        for name in ("iter_2_20260101_000200", "iter_0_20260101_000000",
-                     "iter_1_20260101_000100"):
+        for name in (
+            "iter_2_20260101_000200",
+            "iter_0_20260101_000000",
+            "iter_1_20260101_000100",
+        ):
             (tmp_path / name).mkdir()
 
         result = list_iterations(tmp_path)

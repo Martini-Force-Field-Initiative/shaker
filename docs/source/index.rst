@@ -83,33 +83,14 @@ Clone the repository
 
    git clone https://github.com/Lp0lp/shaker.git
 
-Create a virtual environment with the dependencies (e.g. with **conda**):
-
-.. code-block:: bash
-
-   cd shaker
-   conda env create -f environment-user.yml
-
-This will create a conda environment with the name shaker-env.
-
-***OR*** with **venv**:
-
-.. code-block:: bash
-
-   cd shaker
-   python3 -m venv shaker-venv
-
-This will create a venv environment with the name shaker-env.
-
-Then activate your respective environment.
-
 ### Step2:
 
-Install SHAKER with pip:
+Install SHAKER and its dependencies with `uv <https://docs.astral.sh/uv/>`_:
 
 .. code-block:: bash
 
-   pip install .
+   cd shaker
+   uv sync --group test
 
 ### Step3:
 
@@ -117,7 +98,7 @@ Test the package with pytest
 
 .. code-block:: bash
 
-   pytest -v tests/
+   uv run pytest -v tests/
 
 Requirements
 ------------
