@@ -1,4 +1,12 @@
+import warnings
 from importlib.metadata import version
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"pkg_resources is deprecated as an API",
+    category=UserWarning,
+    module=r"nglview",
+)
 
 __version__ = version("shaker")
 
