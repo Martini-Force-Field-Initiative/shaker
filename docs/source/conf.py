@@ -22,6 +22,8 @@ release = "0.1.0"
 
 extensions = [
     "numpydoc",  # NumPy documentation
+    "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
     "sphinx.ext.viewcode",  # Link to local code
     "myst_nb",  # Jupyter notebooks & Markdown (superset of myst_parser)
     "sphinx_design",  # To add buttons and cards

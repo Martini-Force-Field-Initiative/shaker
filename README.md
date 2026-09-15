@@ -27,36 +27,21 @@ It provides modular utilities for mapping atomistic trajectories to CG represent
 Clone the repository
 ```bash
 git clone https://github.com/Lp0lp/shaker.git
-
 ```
-Create a virtual environment with the dependencies (e.g. with **conda**):
-```bash
 cd shaker
-conda env create -f environment-user.yml
-```
-This will create a conda environment with the name shaker-env.
-
-***OR*** with **venv**:
-```bash
-cd shaker
-python3 -m venv shaker-venv
-```
-This will create a venv environment with the name shaker-env.
-
-Then activate your respective environment.
 
 ### Step2:
 
-Install SHAKER with pip:
+Install SHAKER and its dependencies with [uv](https://docs.astral.sh/uv/):
 ```bash
-pip install .
+uv sync --group test
 ```
 
 ### Step3:
 
 Test the package with pytest
 ```bash
-pytest -v tests/
+uv run pytest -v tests/
 ```
 
 All the tests should pass, if not please open an issue.
@@ -79,12 +64,12 @@ All the tests should pass, if not please open an issue.
 
 Install SHAKER in your environment along with all development dependency groups (lint, typecheck, test, docs):
 ```bash
-python -m pip install --group all
+uv sync --all-groups
 ```
 
 Then install the linting/formatting hooks so your changes are checked automatically:
 ```bash
-pre-commit install
+uv run pre-commit install
 ```
 This runs `ruff` (lint + format) on staged files at commit time; the same checks also run in CI on every PR.
 
