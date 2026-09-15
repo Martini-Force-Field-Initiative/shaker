@@ -13,6 +13,7 @@ authors = [
   { name = "Pablo Cardona Perez", email = "pablo.cardona_perez@ens-lyon.fr" }
 ]
 dependencies = [
+"setuptools>61,<81", 
 "ipywidgets==8.1.8",
 "numpy",
 "matplotlib", 
