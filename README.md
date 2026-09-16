@@ -219,6 +219,14 @@ Step-by-step Jupyter notebooks are available in [`tutorials/`](tutorials/):
 
 ---
 
+## Developed by:
+
+- Luís Borges Araújo — <luis.borges@ens-lyon.fr>
+- Pablo Cardona Perez — <pablo.cardona_perez@ens-lyon.fr>
+
+---
+
+
 ## License
 
 LGPLv2.1 License. See [LICENSE](LICENSE) for details.
