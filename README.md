@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="img/logo-with-name.svg" alt="Shaker" width="480">
+    <img src="docs/source/_static/logo-with-name.svg" alt="Shaker" width="480">
 </p>
 
 **Shaker** is a Python toolkit for parameterizing and validating Martini coarse-grained (CG) force fields against atomistic or quantum-mechanical reference data.
