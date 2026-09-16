@@ -1,5 +1,9 @@
-SHAKER Documentation
-====================
+.. image:: _static/logo-with-name.png
+   :alt: Shaker
+   :width: 480px
+   :align: center
+
+ 
 `Licenced with LGPLv2.1 <https://www.gnu.org/licenses/old-licenses/lgpl-2.1.en.html>`_
 
 **SHAKER** is a Python toolkit for parameterizing molecules with the Martini coarse-grained (CG) force field
