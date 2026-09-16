@@ -81,7 +81,7 @@ Clone the repository
 
 .. code-block:: bash
 
-   git clone https://github.com/Lp0lp/shaker.git
+   git clone https://github.com/Martini-Force-Field-Initiative/shaker/
 
 ### Step2:
 
