@@ -26,7 +26,7 @@ It provides modular utilities for mapping atomistic trajectories to CG represent
 
 Clone the repository
 ```bash
-git clone https://github.com/Lp0lp/shaker.git
+git clone https://github.com/Martini-Force-Field-Initiative/shaker/
 ```
 cd shaker
 
