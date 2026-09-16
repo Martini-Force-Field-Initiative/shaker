@@ -1,6 +1,8 @@
-# SHAKER
+<p align="center">
+  <img src="img/logo-with-name.svg" alt="Shaker" width="480">
+</p>
 
-**SHAKER** is a Python toolkit for parameterizing and validating Martini coarse-grained (CG) force fields against atomistic or quantum-mechanical reference data.
+**Shaker** is a Python toolkit for parameterizing and validating Martini coarse-grained (CG) force fields against atomistic or quantum-mechanical reference data.
 
 It provides modular utilities for mapping atomistic trajectories to CG representations, measuring and fitting bonded distributions, preparing GROMACS simulation systems, and visualizing CG models — all designed for interactive use in Jupyter notebooks.
 
