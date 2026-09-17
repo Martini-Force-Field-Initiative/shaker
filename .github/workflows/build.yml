@@ -1,4 +1,4 @@
-name: Build documentation and wheel
+name: Build documentation, wheel and publish to PyPI
 
 on:
   workflow_run:
@@ -45,6 +45,26 @@ jobs:
           name: python-distributions
           path: dist
 
+  publish-to-pypi:
+    name: Publish Python distribution to PyPI
+    if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
+    needs:
+    - wheel
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/martini-shaker
+    permissions:
+      id-token: write  # IMPORTANT: mandatory for trusted publishing
+
+    steps:
+    - name: Download all the dists
+      uses: actions/download-artifact@v6
+      with:
+        name: python-distributions
+        path: dist/
+    - name: Publish distribution to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
 
   publish-to-testpypi:
     name: Publish Python distribution to TestPyPI
