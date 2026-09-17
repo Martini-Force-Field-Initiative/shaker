@@ -54,7 +54,7 @@ jobs:
 
     environment:
       name: shaker-pypi
-      url: https://test.pypi.org/p/shaker
+      url: https://test.pypi.org/p/martini-shaker
 
     permissions:
       id-token: write  # IMPORTANT: mandatory for trusted publishing
