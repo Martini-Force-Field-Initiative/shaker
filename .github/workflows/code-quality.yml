@@ -1,3 +1,4 @@
+name: Python Code Quality
 on:
   push:
     branches:
