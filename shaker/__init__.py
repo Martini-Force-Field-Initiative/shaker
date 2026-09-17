@@ -8,7 +8,7 @@ warnings.filterwarnings(
     module=r"nglview",
 )
 
-__version__ = version("shaker")
+__version__ = version("martini-shaker")
 
 __all__ = [
     "__version__",
