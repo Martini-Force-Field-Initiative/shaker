@@ -12,6 +12,13 @@ authors = [
   { name = "Luís Borges Araújo", email = "luis.borges@ens-lyon.fr"},
   { name = "Pablo Cardona Perez", email = "pablo.cardona_perez@ens-lyon.fr" }
 ]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "LGPL-2.1-only"
+license-files = ["LICENSE"]
+
 dependencies = [
 "setuptools>61,<81", 
 "ipywidgets==8.1.8",
@@ -36,6 +43,10 @@ all = [
       { include-group = "docs" }
       ]
 
+
+[project.urls]
+Homepage = "https://github.com/Martini-Force-Field-Initiative/shaker"
+Issues = "https://github.com/Martini-Force-Field-Initiative/shaker/issues"
 
 [tool.ruff]
 target-version = "py310"
