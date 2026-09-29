@@ -335,6 +335,28 @@ def runSim(
 
     Output files use the prefixes `m`, `r`, and `p` corresponding to
     minimization, relaxation, and production stages.
+
+    With `verbose=False`, the printed output is one line per stage, e.g.::
+
+        runSim · output → gmx_run.log
+          min    3491 steps   Fmax 24.8 (target 10)   ✓
+          rel    ETA 20:05 (~1 min) · 25 · 50 · 75        10.0/10.0 ns   16304 ns/day   0:00:53   ✓
+          prod   ETA 20:14 (~9 min) · 25 · 50 · 75        200.0/200.0 ns   31733 ns/day   0:09:05   ✓
+
+    Each line is written as the stage runs and never rewritten: for rel and
+    prod, an ETA once ~5% is done, then milestones at 25/50/75%; when the
+    stage ends, its result is appended, read from the stage's .log:
+
+    - min: steps taken and the final max force vs. `emtol`. Stopping above
+      the target at machine precision is normal for Martini.
+    - rel/prod: simulated vs. planned time, ns/day and wall time.
+    - ✓, or ⚠ followed by the problems found: `did not finish`,
+      `stopped early` (fewer steps than planned, e.g. `-maxh`),
+      `N LINCS warnings`.
+
+    If a stage fails, its line ends with `✗ failed` and the error shows the
+    last lines of GROMACS output. `run_status` prints the same result lines
+    for a finished run directory.
     """
 
     if minMDP is None:
@@ -810,7 +832,11 @@ def _traj_cleanup(gro, xtc, tpr, outname="pbc", gmx_loc=""):
     """
     Remove water and fix PBC after running the production.
     """
-    u = md.Universe(gro)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message=r"Failed to guess the mass", category=UserWarning
+        )
+        u = md.Universe(gro)
     clean = u.select_atoms("not resname W ION NA CL")
     clean.write("index_clean.ndx", mode="w", name="clean")
     sel_in = "clean\n"
