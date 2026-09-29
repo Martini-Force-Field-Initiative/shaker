@@ -1,10 +1,13 @@
 """Tests for shaker/system_builders.py — iteration checkpointing."""
 
 import json
+import subprocess
+import sys
+import time
 
 import pytest
 
-from shaker.system_builders import _checkpoint, list_iterations
+from shaker.system_builders import _checkpoint, _run_mdrun, list_iterations
 
 
 def _make_cleaned_traj(dir_path, pdb_text="ATOM\n", xtc_text="xtc"):
@@ -139,3 +142,31 @@ class TestCheckpoint:
 
         with pytest.raises(ValueError, match="keep_last must be"):
             _checkpoint(keep_last=bad_value)
+
+
+class TestRunMdrun:
+    """_run_mdrun with a fake mdrun (a python one-liner)."""
+
+    def _fake(self, code):
+        return [sys.executable, "-c", code]
+
+    def test_echoes_output_and_returns(self, capsys):
+        _run_mdrun(self._fake("print('step 100, will finish soon')"))
+        assert "step 100" in capsys.readouterr().out
+
+    def test_nonzero_exit_raises(self):
+        with pytest.raises(subprocess.CalledProcessError):
+            _run_mdrun(self._fake("import sys; sys.exit(1)"))
+
+    def test_kills_process_stuck_after_fatal_error(self):
+        code = "import time; print('Fatal error:', flush=True); time.sleep(60)"
+        start = time.monotonic()
+        with pytest.raises(RuntimeError, match="fatal error"):
+            _run_mdrun(self._fake(code), fatal_grace=0.5, poll=0.1)
+        assert time.monotonic() - start < 15
+
+    def test_kills_silent_process(self):
+        start = time.monotonic()
+        with pytest.raises(RuntimeError, match="no output"):
+            _run_mdrun(self._fake("import time; time.sleep(60)"), hang_timeout=1, poll=0.1)
+        assert time.monotonic() - start < 15
