@@ -31,8 +31,7 @@ def measure_bonded_terms(
     bins_dist=None,
     bins_angl=None,
     bins_dihed=None,
-    save_npy=False,
-    outname="",
+    save_npy=None,
 ):
     """
     Measure bonded distributions (distances, angles, and dihedrals) from a trajectory.
@@ -68,10 +67,10 @@ def measure_bonded_terms(
         Bin edges used for angle histograms.
     bins_dihed : array-like, optional
         Bin edges used for dihedral histograms.
-    save_npy : bool, optional
-        If True, raw measurements and histogram data are saved to `.npy` files.
-    outname : str, optional
-        Prefix used for saved output files. Required if `save_npy=True`.
+    save_npy : str or None, optional
+        If given, a filename prefix: raw measurements and histograms are
+        saved as ``{save_npy}_distances/angles/dihedrals/hists.npy``.
+        Default None (not saved).
 
     Returns
     -------
@@ -96,9 +95,6 @@ def measure_bonded_terms(
     - The trajectory is iterated using the provided frame slicing
       ``u.trajectory[start:stop:stride]``.
     """
-
-    if save_npy and not outname:
-        raise ValueError("outname must be provided when save_npy=True")
 
     if bins_dist is None:
         bins_dist = np.arange(0, 15, 0.2)
@@ -191,11 +187,11 @@ def measure_bonded_terms(
         },
     }
 
-    if save_npy:
-        np.save(f"{outname}_angles.npy", ang_out)
-        np.save(f"{outname}_distances.npy", dist_out)
-        np.save(f"{outname}_dihedrals.npy", dihed_out)
-        np.save(f"{outname}_hists.npy", results)
+    if save_npy is not None:
+        np.save(f"{save_npy}_angles.npy", ang_out)
+        np.save(f"{save_npy}_distances.npy", dist_out)
+        np.save(f"{save_npy}_dihedrals.npy", dihed_out)
+        np.save(f"{save_npy}_hists.npy", results)
 
     return results
 

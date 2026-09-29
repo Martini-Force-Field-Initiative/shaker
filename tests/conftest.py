@@ -3,6 +3,12 @@ import numpy as np
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _run_in_tmp_path(tmp_path, monkeypatch):
+    """Run every test in its own temp dir: SHAKER saves figures by default."""
+    monkeypatch.chdir(tmp_path)
+
+
 def make_universe(positions, names, resname="MOL", resid=1):
     """Build a single-residue in-memory universe at fixed positions (in Å)."""
     n = len(positions)

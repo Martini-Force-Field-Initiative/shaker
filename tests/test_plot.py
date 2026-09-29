@@ -21,21 +21,21 @@ def _restore_options():
 
 
 class TestFinishFigure:
-    def test_saves_each_format_or_exact_path_creating_dirs(self, tmp_path):
+    def test_svg_by_default_other_formats_by_extension(self, tmp_path):
         fig = plt.figure()
-        _finish_figure(fig, tmp_path / "stem", ("png", "svg"), True, show=False)
-        _finish_figure(fig, tmp_path / "sub" / "exact.pdf", ("png",), True, show=False)
+        _finish_figure(fig, tmp_path / "stem", True, show=False)
+        _finish_figure(fig, tmp_path / "sub" / "fit.png", True, False, tag="A-B")
 
         saved = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*.*"))
-        assert saved == ["stem.png", "stem.svg", "sub/exact.pdf"]
+        assert saved == ["stem.svg", "sub/fit_A-B.png"]
 
     def test_show_false_closes_and_none_follows_set_options(self):
         fig = plt.figure()
-        assert _finish_figure(fig, None, (), True, show=None) is True
+        assert _finish_figure(fig, None, True, show=None) is True
         assert plt.fignum_exists(fig.number)
 
         set_options(show=False)
-        assert _finish_figure(fig, None, (), True, show=None) is False
+        assert _finish_figure(fig, None, True, show=None) is False
         assert not plt.fignum_exists(fig.number)
 
 
