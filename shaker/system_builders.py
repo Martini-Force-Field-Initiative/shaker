@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 
@@ -420,6 +420,11 @@ def runSim(
         _traj_cleanup("p.gro", "p.xtc", "p.tpr", gmx_loc=gmx_loc)
         _checkpoint(mapping=mapping, keep_last=keep_last)
 
+    # Short recap, so e.g. a -maxh-truncated production doesn't go unnoticed.
+    print()
+    for prefix, name in _STAGES.items():
+        print(_stage_line(name, _stage_report(f"{prefix}.log")))
+
 
 def list_iterations(run_dir):
     """
@@ -456,6 +461,146 @@ def list_iterations(run_dir):
 
     found.sort(key=lambda pair: pair[0])
     return [path for _, path in found]
+
+
+def run_status(run_dir=".", verbose=True):
+    """
+    Report on the last `runSim` in `run_dir`, read from its m/r/p .log files.
+
+    Useful when you did not watch the run yourself (the kernel died, an old
+    folder, an agent picking up where it left off). `runSim` prints the same
+    per-stage lines when it finishes.
+
+    Parameters
+    ----------
+    run_dir : str or Path, optional
+        Directory `runSim` was executed in. Default is ".".
+    verbose : bool, optional
+        If True (default), print one line per stage plus a summary line.
+
+    Returns
+    -------
+    dict
+        {"min"/"rel"/"prod": stage dict or None if no log,
+         "done": cleaned trajectory present, "crash_files": [...],
+         "iterations": [...]}. Stage dicts hold: finished, integrator,
+        nsteps, steps_done, dt, ns_per_day, wall_s, stopped_early,
+        lincs_warnings, fmax and emtol (minimization only).
+    """
+    run_dir = Path(run_dir)
+    status = {
+        name: _stage_report(run_dir / f"{prefix}.log")
+        for prefix, name in _STAGES.items()
+    }
+    status["done"] = (run_dir / "pbc.pdb").is_file() and (
+        run_dir / "pbc.xtc"
+    ).is_file()
+    status["crash_files"] = sorted(
+        p.name for pattern in ("step*.pdb", "crash*") for p in run_dir.glob(pattern)
+    )
+    status["iterations"] = [p.name for p in list_iterations(run_dir)]
+
+    if verbose:
+        for name in _STAGES.values():
+            print(_stage_line(name, status[name]))
+        crash = ", ".join(status["crash_files"]) or "none"
+        print(
+            f"cleaned traj: {'yes' if status['done'] else 'no'}   "
+            f"iterations: {len(status['iterations'])}   crash files: {crash}"
+        )
+    return status
+
+
+_STAGES = {"m": "min", "r": "rel", "p": "prod"}
+_EM_INTEGRATORS = ("steep", "cg", "l-bfgs")
+
+
+def _stage_report(log_path):
+    """
+    Pull the few numbers worth reporting out of an mdrun .log (None if missing).
+
+    Log wording can change between GROMACS versions, so every field is
+    optional: a pattern that stops matching leaves that field None and it is
+    simply left out of the report, never misreported.
+    """
+    path = Path(log_path)
+    if not path.is_file():
+        return None
+    text = path.read_text(errors="replace")
+
+    def last(pattern, cast=float):
+        found = re.findall(pattern, text, re.M)
+        return cast(found[-1]) if found else None
+
+    integrator = last(r"^\s+integrator\s+=\s+(\S+)", str)
+    minimization = integrator in _EM_INTEGRATORS
+    # -nsteps on the command line overrides the mdp value.
+    nsteps = last(r"Overriding nsteps with value passed on the command line: (-?\d+)", int)
+    if nsteps is None:
+        nsteps = last(r"^\s+nsteps\s+=\s+(-?\d+)", int)
+    if minimization:
+        steps_done = last(r" in (\d+) steps", int)
+    else:
+        # MD averages are over steps_done + 1 frames (step 0 included).
+        stats = last(r"Statistics over (\d+) steps", int)
+        steps_done = stats - 1 if stats else None
+
+    finished = "Finished mdrun" in text
+    return {
+        "finished": finished,
+        "integrator": integrator,
+        "nsteps": nsteps,
+        "steps_done": steps_done,
+        "dt": last(r"^\s+dt\s+=\s+(\S+)"),
+        # Only MD reports ns/day; minimization has no simulated time.
+        "ns_per_day": None if minimization else last(r"^Performance:\s+(\S+)"),
+        "wall_s": last(r"^\s+Time:\s+\S+\s+(\S+)"),
+        # Finished short of nsteps (-maxh, a signal, ...). Minimization may
+        # legitimately stop early, so MD only.
+        "stopped_early": (
+            not minimization
+            and finished
+            and None not in (steps_done, nsteps)
+            and 0 <= steps_done < nsteps
+        ),
+        "lincs_warnings": text.count("LINCS WARNING"),
+        # Minimization: final max force vs. the target. Stopping at machine
+        # precision above emtol is normal for Martini, so no flag for it.
+        "fmax": last(r"^Maximum force\s+=\s+(\S+)") if minimization else None,
+        "emtol": last(r"^\s+emtol\s+=\s+(\S+)") if minimization else None,
+    }
+
+
+def _stage_line(name, rep):
+    """
+    One human-readable line for a `_stage_report` dict.
+    """
+    if rep is None:
+        return f"{name:<5} no log"
+
+    if rep["integrator"] in _EM_INTEGRATORS:
+        body = f"{rep['steps_done']} steps" if rep["steps_done"] else ""
+        if rep["fmax"] is not None:
+            body += f"   Fmax {rep['fmax']:.1f} (target {rep['emtol']:g})"
+    elif rep["steps_done"] is not None and rep["dt"] and rep["nsteps"]:
+        done_ns = rep["steps_done"] * rep["dt"] / 1000
+        total_ns = rep["nsteps"] * rep["dt"] / 1000
+        body = f"{done_ns:.1f}/{total_ns:.1f} ns"
+    else:
+        body = ""
+    if rep["ns_per_day"]:
+        body += f"   {rep['ns_per_day']:.0f} ns/day"
+    if rep["wall_s"]:
+        body += f"   {timedelta(seconds=round(rep['wall_s']))}"
+
+    flags = []
+    if not rep["finished"]:
+        flags.append("did not finish")
+    if rep["stopped_early"]:
+        flags.append("stopped early")
+    if rep["lincs_warnings"]:
+        flags.append(f"{rep['lincs_warnings']} LINCS warnings")
+    return f"{name:<5} {body.strip()}" + "".join(f"   ⚠ {f}" for f in flags)
 
 
 def _run(cmd, *, log=None, env=None, input_text=None, cwd=None):

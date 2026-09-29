@@ -1,13 +1,24 @@
 """Tests for shaker/system_builders.py — iteration checkpointing."""
 
 import json
+import shutil
 import subprocess
 import sys
 import time
 
 import pytest
 
-from shaker.system_builders import _checkpoint, _run_mdrun, list_iterations
+from pathlib import Path
+
+from shaker.system_builders import (
+    _checkpoint,
+    _run_mdrun,
+    list_iterations,
+    run_status,
+)
+
+DATA = Path(__file__).parent / "data"
+FINISHED_LOG = DATA / "prod_finished.log"
 
 
 def _make_cleaned_traj(dir_path, pdb_text="ATOM\n", xtc_text="xtc"):
@@ -170,3 +181,38 @@ class TestRunMdrun:
         with pytest.raises(RuntimeError, match="no output"):
             _run_mdrun(self._fake("import time; time.sleep(60)"), hang_timeout=1, poll=0.1)
         assert time.monotonic() - start < 15
+
+
+class TestRunStatus:
+    def test_finished_production(self, tmp_path, capsys):
+        shutil.copy(DATA / "min_finished.log", tmp_path / "m.log")
+        shutil.copy(FINISHED_LOG, tmp_path / "p.log")
+        _make_cleaned_traj(tmp_path)
+
+        status = run_status(tmp_path)
+
+        assert status["min"]["steps_done"] == 3491
+        assert status["min"]["fmax"] == pytest.approx(24.808376)
+
+        prod = status["prod"]
+        assert prod["finished"] and not prod["stopped_early"]
+        assert prod["steps_done"] == prod["nsteps"] == 10000000
+        assert status["rel"] is None and status["done"]
+        out = capsys.readouterr().out
+        assert "min   3491 steps   Fmax 24.8 (target 10)\n" in out
+        assert "200.0/200.0 ns   31733 ns/day   0:09:05" in out
+        assert "⚠" not in out.splitlines()[2]
+
+    def test_flags_truncated_run_with_lincs_warnings(self, tmp_path, capsys):
+        log = FINISHED_LOG.read_text()
+        log = log.replace("Statistics over 10000001", "Statistics over 3000001")
+        log = log.replace(
+            "Writing checkpoint", "Step 0, time 0 (ps)  LINCS WARNING\nWriting checkpoint"
+        )
+        (tmp_path / "p.log").write_text(log)
+
+        run_status(tmp_path)
+
+        out = capsys.readouterr().out
+        assert "60.0/200.0 ns" in out
+        assert "stopped early" in out and "1 LINCS warnings" in out
