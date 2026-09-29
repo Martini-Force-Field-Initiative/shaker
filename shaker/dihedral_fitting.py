@@ -250,8 +250,7 @@ def fit_dihedral_workflow(
     weight_mode="boltzmann",
     weights=None,
     w_temp_kj=2.5,
-    outfile=None,
-    formats=("svg",),
+    outfile="dihedral_fit",
     transparent=True,
     show=False,
 ):
@@ -289,11 +288,11 @@ def fit_dihedral_workflow(
     w_temp_kj : float
         Effective temperature for Boltzmann weighting. Default 2.5.
     outfile : str or Path or None, optional
-        Save a figure of the raw potential, smoothed potential and fit as
-        `<outfile>.<format>` for each of `formats`, or exactly as `outfile`
-        if it has an image extension. Default None (not saved).
-    formats : sequence of str, optional
-        Image formats to save, e.g. ("svg", "png", "pdf"). Default ("svg",).
+        Where to save a figure of the raw potential, smoothed potential and
+        fit: as SVG unless it ends in another image extension (e.g. ".png"),
+        with the dihedral appended when `tgt` is given, e.g.
+        `dihedral_fit_B1-B2-B3-B4.svg`. Overwritten if it exists; None saves
+        nothing. Default "dihedral_fit".
     transparent : bool, optional
         Save with a transparent background. Default True.
     show : bool or None, optional
@@ -344,7 +343,8 @@ def fit_dihedral_workflow(
         ax.set_xlabel("Dihedral angle (°)", fontweight="bold")
         ax.set_xlim(-180, 180)
         fig.tight_layout()
-        if _finish_figure(fig, outfile, formats, transparent, show):
+        tag = "-".join(tgt) if tgt is not None else None
+        if _finish_figure(fig, outfile, transparent, show, tag=tag):
             plt.show()
             ## Also print the potential
             for line in model["report"]:

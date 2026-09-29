@@ -251,8 +251,7 @@ def assess_overlap_matrix(
     cell_fontsize=11,
     title="Intra-bead Distance Overlap",
     save_npy=None,
-    outfile=None,
-    formats=("svg",),
+    outfile="overlap_matrix",
     transparent=True,
     show=None,
 ):
@@ -301,11 +300,9 @@ def assess_overlap_matrix(
         as ``{save_npy}_aa/cg_intra_bead_distances_raw/hists.npy``. Default
         None (not saved).
     outfile : str or Path or None, optional
-        Output filename stem; the figure is saved as `<outfile>.<format>` for
-        each of `formats`, or exactly as `outfile` if it already has an image
-        extension (e.g. "overlap.png"). Default None (not saved).
-    formats : sequence of str, optional
-        Image formats to save, e.g. ("svg", "png", "pdf"). Default ("svg",).
+        Where to save the figure: as SVG (`<outfile>.svg`) unless it ends in
+        another image extension, e.g. "overlap.png". Overwritten if it
+        exists; None saves nothing. Default "overlap_matrix".
     transparent : bool, optional
         Save with a transparent background. Default True.
     show : bool or None, optional
@@ -324,7 +321,7 @@ def assess_overlap_matrix(
     Examples
     --------
     >>> oc, fig, axes = assess_overlap_matrix(u_aa, u_cg, resname='MOL',
-    ...                                       outfile='MOL_overlap')
+    ...                                       outfile='MOL_overlap.png')
 
     >>> oc, fig, axes = assess_overlap_matrix(u_aa, u_cg, resname='MOL',
     ...                                       bead_names=['BB', 'SC1', 'SC2'])
@@ -372,5 +369,5 @@ def assess_overlap_matrix(
     fig, axes = _plot_overlap_matrix(
         oc, vmin=vmin, vmax=vmax, title=title, cell_fontsize=cell_fontsize
     )
-    _finish_figure(fig, outfile, formats, transparent, show)
+    _finish_figure(fig, outfile, transparent, show)
     return oc, fig, axes

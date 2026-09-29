@@ -285,7 +285,7 @@ class TestRenderedSvg:
                 pdb,
                 "MOL",
                 mapping or self.MAPPING,
-                out_svg=str(tmp_path / "out.svg"),
+                outfile=tmp_path / "out.svg",
                 **kwargs,
             )
 

@@ -40,8 +40,7 @@ def bonded_estimator(
     ang_tgts=None,
     harm_dihed_tgts=None,
     imp_dihed_tgts=None,
-    outfile=None,
-    formats=("svg",),
+    outfile="dihedral_fit",
     transparent=True,
     show=False,
     T=300,
@@ -83,10 +82,9 @@ def bonded_estimator(
         theorem and written as type 2 (harmonic improper).
     outfile : str or Path or None, optional
         Filename prefix: each proper dihedral's fit (raw potential, smoothed
-        potential and fit) is saved as `<outfile>_<B1-B2-B3-B4>.<format>`.
-        Default None (not saved).
-    formats : sequence of str, optional
-        Image formats to save, e.g. ("svg", "png", "pdf"). Default ("svg",).
+        potential and fit) is saved as `<outfile>_<B1-B2-B3-B4>.svg`, or in
+        another format if `outfile` ends in its extension (e.g. "fit.png").
+        Overwritten if it exists; None saves nothing. Default "dihedral_fit".
     transparent : bool, optional
         Save with a transparent background. Default True.
     show : bool or None, optional
@@ -163,7 +161,6 @@ def bonded_estimator(
         harm_dihed_tgts=harm_dihed_tgts,
         imp_dihed_tgts=imp_dihed_tgts,
         outfile=outfile,
-        formats=formats,
         transparent=transparent,
         show=show,
         T=T,
@@ -182,8 +179,7 @@ def _estimate_bonded_from_dict(
     ang_tgts=None,
     harm_dihed_tgts=None,
     imp_dihed_tgts=None,
-    outfile=None,
-    formats=("svg",),
+    outfile="dihedral_fit",
     transparent=True,
     show=False,
     T=300,
@@ -218,10 +214,9 @@ def _estimate_bonded_from_dict(
         theorem and written as type 2 (harmonic improper).
     outfile : str or Path or None, optional
         Filename prefix: each proper dihedral's fit (raw potential, smoothed
-        potential and fit) is saved as `<outfile>_<B1-B2-B3-B4>.<format>`.
-        Default None (not saved).
-    formats : sequence of str, optional
-        Image formats to save, e.g. ("svg", "png", "pdf"). Default ("svg",).
+        potential and fit) is saved as `<outfile>_<B1-B2-B3-B4>.svg`, or in
+        another format if `outfile` ends in its extension (e.g. "fit.png").
+        Overwritten if it exists; None saves nothing. Default "dihedral_fit".
     transparent : bool, optional
         Save with a transparent background. Default True.
     show : bool or None, optional
@@ -397,8 +392,7 @@ def _estimate_bonded_from_dict(
             bins,
             hist,
             tgt=tgt,
-            outfile=f"{outfile}_{'-'.join(tgt)}" if outfile else None,
-            formats=formats,
+            outfile=outfile,
             transparent=transparent,
             show=show,
         )

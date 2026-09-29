@@ -5,7 +5,6 @@ import re
 import uuid
 import warnings
 from collections import Counter
-from pathlib import Path
 from xml.sax.saxutils import escape as _xml_escape
 
 from rdkit import Chem
@@ -14,13 +13,14 @@ from rdkit.Chem.Draw import rdMolDraw2D
 from rdkit.Geometry import Point3D
 
 from .helper import _category_from_type
+from .plot import _figure_path
 
 
 def render_2dMapping(
     pdb_file,
     resname,
     mapping,
-    out_svg="cg_overlay.svg",
+    outfile="cg_overlay",
     size=(950, 480),
     mode="connected",
     bead_r=15.0,
@@ -62,8 +62,9 @@ def render_2dMapping(
                     "BEAD2": {"type": "...", "charge": 0, "atoms": [...]},
                 }
             }
-    out_svg : str, optional
-        Output SVG filename.
+    outfile : str or Path or None, optional
+        Where to save the SVG (`<outfile>.svg`; only SVG can be written).
+        Overwritten if it exists; None saves nothing. Default "cg_overlay".
     mode : {"circle", "atomblobs", "connected", "both"}, optional
         CG rendering style.
     size : tuple of int, optional
@@ -120,9 +121,13 @@ def render_2dMapping(
     Returns
     -------
     str
-        The SVG source string. The same content is also written to ``out_svg``.
+        The SVG source string. The same content is also written to ``outfile``.
     """
 
+    if outfile is not None:
+        outfile = _figure_path(outfile)
+        if outfile.suffix.lower() != ".svg":
+            raise ValueError(f"render_2dMapping only writes SVG, got '{outfile}'")
     if mode not in {"circle", "atomblobs", "connected", "both"}:
         raise ValueError(
             "mode must be one of: 'circle', 'atomblobs', 'connected', 'both'"
@@ -377,7 +382,9 @@ def render_2dMapping(
     svg = parts[0] + "\n".join(overlay) + "\n</svg>" + parts[1]
     svg = _fit_canvas(svg, w, h, extents)
 
-    Path(out_svg).write_text(svg, encoding="utf-8")
+    if outfile is not None:
+        outfile.parent.mkdir(parents=True, exist_ok=True)
+        outfile.write_text(svg, encoding="utf-8")
     return svg
 
 

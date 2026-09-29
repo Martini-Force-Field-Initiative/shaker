@@ -9,6 +9,7 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import gridspec
+from matplotlib.backend_bases import FigureCanvasBase
 from scipy.stats import wasserstein_distance
 
 from ._options import _resolve
@@ -27,7 +28,6 @@ def plot_sasa_dir(
     xvg="SASA.xvg",
     kind="violin",
     outfile="SASABar",
-    formats=("svg",),
     transparent=True,
     show=None,
 ):
@@ -66,11 +66,9 @@ def plot_sasa_dir(
     kind : {"violin", "overlay"}, optional
         Chart style, see above. Default is "violin".
     outfile : str or Path or None, optional
-        Output filename stem; the figure is saved as `<outfile>.<format>` for
-        each of `formats`, or exactly as `outfile` if it already has an image
-        extension (e.g. "sasa.png"). None saves nothing. Default "SASABar".
-    formats : sequence of str, optional
-        Image formats to save, e.g. ("svg", "png", "pdf"). Default ("svg",).
+        Where to save the figure: as SVG (`<outfile>.svg`) unless it ends in
+        another image extension, e.g. "sasa.png". Overwritten if it exists;
+        None saves nothing. Default "SASABar".
     transparent : bool, optional
         Save with a transparent background. Default True.
     show : bool or None, optional
@@ -97,7 +95,7 @@ def plot_sasa_dir(
         fig, ax, items = _plot_sasa_overlay(root, xvg)
     else:
         fig, ax, items = _plot_sasa_violin(root, xvg)
-    _finish_figure(fig, outfile, formats, transparent, show)
+    _finish_figure(fig, outfile, transparent, show)
     return fig, ax, items
 
 
@@ -359,7 +357,6 @@ def plot_bonded_distributions(
     labels=None,
     colors=None,
     outfile="cleanbonds",
-    formats=("svg",),
     transparent=True,
     show_peaks=False,
     metrics=True,
@@ -387,12 +384,9 @@ def plot_bonded_distributions(
         Line colors for each bonded dictionary. If None, matplotlib default cycle is used.
 
     outfile : str | Path | None, optional
-        Output filename stem; saves `<outfile>.<format>` for each of
-        `formats`, or exactly `outfile` if it already has an image extension
-        (e.g. "bonds.png"). If None, nothing is saved. Default "cleanbonds".
-
-    formats : sequence of str, optional
-        Image formats to save, e.g. ("svg", "png", "pdf"). Default ("svg",).
+        Where to save the figure: as SVG (`<outfile>.svg`) unless it ends in
+        another image extension, e.g. "bonds.png". Overwritten if it exists;
+        None saves nothing. Default "cleanbonds".
 
     transparent : bool, optional
         Save with a transparent background. Default True.
@@ -662,30 +656,41 @@ def plot_bonded_distributions(
             ax.set_xlabel(config[cat]["xlabel"], fontsize=9)
             ax.set_ylabel("Prob. density")
 
-    _finish_figure(fig, outfile, formats, transparent, show)
+    _finish_figure(fig, outfile, transparent, show)
     return fig
 
 
-def _finish_figure(fig, outfile, formats, transparent, show):
+def _figure_path(outfile, tag=None):
     """
-    Save `fig`, then close it unless it should be shown. Returns the
-    resolved `show`.
+    Resolve an `outfile` argument to the file to write: SVG unless it already
+    ends in an image extension (e.g. ".png"). `tag` is inserted before the
+    extension, e.g. one file per dihedral: "fit" → "fit_B1-B2-B3-B4.svg".
+    """
+    path = Path(outfile)
+    ext = path.suffix if path.suffix[1:].lower() in _IMAGE_EXTS else ""
+    stem = path.name[: len(path.name) - len(ext)]
+    if tag:
+        stem = f"{stem}_{tag}"
+    return path.with_name(stem + (ext or ".svg"))
 
-    `outfile` is a stem saved once per format (`<outfile>.<fmt>`), or used
-    as-is if it already ends in an image extension; None saves nothing.
+
+# Extensions matplotlib can write, e.g. {"svg", "png", "pdf", ...}.
+_IMAGE_EXTS = FigureCanvasBase.get_supported_filetypes()
+
+
+def _finish_figure(fig, outfile, transparent, show, tag=None):
+    """
+    Save `fig` (see `_figure_path`; None saves nothing), then close it unless
+    it should be shown. Returns the resolved `show`.
+
     Closing is what stops Jupyter's inline backend from rendering the
     figure at the end of the cell; the returned Figure object still works.
     """
     if outfile is not None:
-        path = Path(outfile)
-        if path.suffix[1:].lower() in fig.canvas.get_supported_filetypes():
-            paths = [path]
-        else:
-            paths = [path.with_name(f"{path.name}.{fmt}") for fmt in formats]
+        path = _figure_path(outfile, tag)
         path.parent.mkdir(parents=True, exist_ok=True)
-        for p in paths:
-            # dpi only matters for raster formats (png, jpg, ...).
-            fig.savefig(p, transparent=transparent, dpi=300, bbox_inches="tight")
+        # dpi only matters for raster formats (png, jpg, ...).
+        fig.savefig(path, transparent=transparent, dpi=300, bbox_inches="tight")
 
     show = _resolve(show, "show")
     if not show:
