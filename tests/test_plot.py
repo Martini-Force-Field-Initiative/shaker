@@ -1,5 +1,7 @@
 """Tests for figure saving/display control (shaker/plot.py, shaker/_options.py)."""
 
+import re
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -67,3 +69,34 @@ def test_plot_sasa_dir_reports_difference_from_aa(tmp_path, capsys):
     assert (
         "CG            5.40 ± 0.00   +0.40 nm²  (+8.0%)  ⚠" in capsys.readouterr().out
     )
+
+
+def test_bonded_report_wraps_dihedrals_and_filters(capsys):
+    x = np.arange(-180, 180, 2.0)
+
+    def peak(mu):
+        h = np.exp(-0.5 * (((x - mu + 180) % 360 - 180) / 15) ** 2)
+        return h / h.sum() / 2
+
+    def bonded(*mus):
+        empty = {"targets": [], "bins": x, "hist": np.empty((0, x.size))}
+        dihedrals = [["A", "B", "C", str(i)] for i in range(len(mus))]
+        hists = np.array([peak(mu) for mu in mus])
+        return {
+            "distances": empty,
+            "angles": empty,
+            "dihedrals": {"targets": dihedrals, "bins": x, "hist": hists},
+        }
+
+    # Term 0: -179° vs 179° (2° apart across ±180); term 1: 60° shift.
+    ref, cg = bonded(-179, 0), bonded(179, 60)
+    with pytest.warns(UserWarning, match="No targets found"):
+        plot_bonded_distributions(ref, cg, outfile=None, show=False)
+    out = capsys.readouterr().out
+    assert re.search(r"A-B-C-0 .* -2\.0  OC 0\.\d\d   W 2\.0  ✓", out)
+    assert "2 terms: 1 ✓  0 ⚠  1 ✗, 1 mean-off" in out
+
+    with pytest.warns(UserWarning, match="No targets found"):
+        plot_bonded_distributions(ref, cg, outfile=None, show=False, only_flagged=True)
+    out = capsys.readouterr().out
+    assert "A-B-C-0" not in out and "A-B-C-1" in out

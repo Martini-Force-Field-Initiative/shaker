@@ -395,6 +395,8 @@ def plot_bonded_distributions(
     show_peaks=False,
     metrics=True,
     show=None,
+    verbose=True,
+    only_flagged=False,
 ):
     """
     Plot bonded distributions (distances, angles, dihedrals) from one or more
@@ -431,12 +433,26 @@ def plot_bonded_distributions(
     metrics : bool, optional
         Whether to compute and display Wasserstein distance and overlap coefficient
         for each distribution against the reference (first) dataset, and shade
-        the overlapping region between curves. Default is True.
+        the overlapping region between curves. Default is True. For
+        dihedrals, W is measured on the circle (-179° and 179° are 2° apart).
 
     show : bool | None, optional
         Whether to display the figure in the notebook. None (default) uses
         the SHAKER-wide setting (see `set_options`), which is True unless
         changed. The figure is saved either way.
+
+    verbose : bool, optional
+        If True (default) and there are at least two datasets, print a text
+        report comparing each dataset with the reference (first) one: per
+        term, mean ± sd of both, Δ mean, OC and W (the same numbers as on the
+        plot), marked ✓ (OC ≥ 0.80), ⚠ (≥ 0.65) or ✗, plus "mean-off" when
+        |Δ| is larger than the reference's sd; then a one-line count. Units
+        are Å for distances and degrees for angles and dihedrals. Printed
+        regardless of `show`.
+
+    only_flagged : bool, optional
+        With `verbose`, list only the terms that are not ✓ or are mean-off
+        (the count line is always printed). Default False.
 
     Returns
     -------
@@ -626,16 +642,13 @@ def plot_bonded_distributions(
                         color=color,
                     )
 
-                    # Wasserstein distance
-                    w_dist = wasserstein_distance(ref_bins, bins, ref_hist, hist)
+                    oc, w_dist = _distribution_metrics(
+                        ref_bins, ref_hist, bins, hist, periodic=cat == "dihedrals"
+                    )
 
-                    # Overlap coefficient: ∫ min(p, q) dx
-                    # For normalized densities this equals the histogram intersection.
-                    oc = _trapz(overlap_y, ref_bins)
-
-                    if oc >= 0.8:
+                    if oc >= _OC_GOOD:
                         line_color, status = "green", "[GOOD]"
-                    elif oc >= 0.65:
+                    elif oc >= _OC_WARN:
                         line_color, status = "orange", "[WARN]"
                     else:
                         line_color, status = "red", "[POOR]"
@@ -691,7 +704,134 @@ def plot_bonded_distributions(
             ax.set_ylabel("Prob. density")
 
     _finish_figure(fig, outfile, transparent, show)
+    if verbose and len(bonded_dicts) > 1:
+        print(_bonded_report(bonded_dicts, labels, active_categories, only_flagged))
     return fig
+
+
+# Overlap-coefficient thresholds for GOOD (✓) / WARN (⚠); below is POOR (✗).
+_OC_GOOD, _OC_WARN = 0.80, 0.65
+
+
+def _distribution_metrics(ref_bins, ref_hist, bins, hist, periodic=False):
+    """
+    Overlap coefficient ∫ min(p, q) dx and Wasserstein distance between two
+    densities given at bin centres. With `periodic` (dihedrals, same bins),
+    W is measured on the circle: -179° and 179° are 2° apart, not 358°.
+    """
+    ref_hist = np.nan_to_num(np.asarray(ref_hist, float))
+    hist = np.nan_to_num(np.asarray(hist, float))
+    oc = _trapz(np.minimum(ref_hist, hist), ref_bins)
+    if ref_hist.sum() == 0 or hist.sum() == 0:
+        return oc, float("nan")
+    if not periodic:
+        return oc, wasserstein_distance(ref_bins, bins, ref_hist, hist)
+    # Circular W1: ∫ |F - G - c| dθ with c the median of F - G (F, G = CDFs).
+    diff = np.cumsum(ref_hist / ref_hist.sum()) - np.cumsum(hist / hist.sum())
+    return oc, np.sum(np.abs(diff - np.median(diff))) * np.mean(np.diff(ref_bins))
+
+
+def _hist_stats(bins, hist, periodic=False):
+    """Mean and sd of a density at bin centres; circular for `periodic`."""
+    w = np.nan_to_num(np.asarray(hist, float))
+    if w.sum() == 0:
+        return float("nan"), float("nan")
+    w = w / w.sum()
+    x = np.asarray(bins, float)
+    if periodic:
+        mean = np.degrees(np.angle(np.sum(w * np.exp(1j * np.radians(x)))))
+        dev = (x - mean + 180) % 360 - 180
+    else:
+        mean = np.sum(w * x)
+        dev = x - mean
+    return float(mean), float(np.sqrt(np.sum(w * dev**2)))
+
+
+def _bonded_summary(ref, other, categories=("distances", "angles", "dihedrals")):
+    """
+    Compare two `measure_bonded_terms` dicts term by term, `ref` being the
+    reference. Returns one dict per term with keys: type, term, ref_mean,
+    ref_sd, mean, sd, delta (wrapped to ±180 for dihedrals), oc, w, status
+    ("✓"/"⚠"/"✗" from OC) and mean_off (|delta| > ref_sd).
+    """
+    summary = []
+    for cat in categories:
+        periodic = cat == "dihedrals"
+        for i, tgt in enumerate(ref[cat]["targets"]):
+            ref_bins, ref_hist = ref[cat]["bins"], ref[cat]["hist"][i]
+            bins, hist = other[cat]["bins"], other[cat]["hist"][i]
+            oc, w = _distribution_metrics(ref_bins, ref_hist, bins, hist, periodic)
+            ref_mean, ref_sd = _hist_stats(ref_bins, ref_hist, periodic)
+            mean, sd = _hist_stats(bins, hist, periodic)
+            delta = mean - ref_mean
+            if periodic:
+                delta = (delta + 180) % 360 - 180
+            summary.append(
+                {
+                    "type": cat[:-1],
+                    "term": "-".join(map(str, tgt)),
+                    "ref_mean": ref_mean,
+                    "ref_sd": ref_sd,
+                    "mean": mean,
+                    "sd": sd,
+                    "delta": delta,
+                    "oc": float(oc),
+                    "w": float(w),
+                    "status": "✓" if oc >= _OC_GOOD else "⚠" if oc >= _OC_WARN else "✗",
+                    "mean_off": abs(delta) > ref_sd,
+                }
+            )
+    return summary
+
+
+def _bonded_report(bonded_dicts, labels, categories, only_flagged=False):
+    """
+    Text report for `plot_bonded_distributions`: one block per dataset vs the
+    reference (first), one line per term (from `_bonded_summary`), then a
+    count line.
+    """
+    blocks = []
+    for other, label in zip(bonded_dicts[1:], labels[1:]):
+        summary = _bonded_summary(bonded_dicts[0], other, categories)
+        rows = [
+            ("", "", f"{labels[0]} mean ± sd", f"{label} mean ± sd", "Δ", "", "", "")
+        ]
+        for t in summary:
+            if only_flagged and t["status"] == "✓" and not t["mean_off"]:
+                continue
+            d = 2 if t["type"] == "distance" else 1  # decimals: Å vs degrees
+            rows.append(
+                (
+                    t["type"],
+                    t["term"],
+                    f"{t['ref_mean']:.{d}f} ± {t['ref_sd']:.{d}f}",
+                    f"{t['mean']:.{d}f} ± {t['sd']:.{d}f}",
+                    f"{t['delta']:+.{d}f}",
+                    f"OC {t['oc']:.2f}",
+                    f"W {t['w']:.{d}f}",
+                    t["status"] + (" mean-off" if t["mean_off"] else ""),
+                )
+            )
+
+        count = {mark: sum(t["status"] == mark for t in summary) for mark in "✓⚠✗"}
+        lines = [f"Bonded: {label} vs {labels[0]}   (distances Å, angles/dihedrals °)"]
+        lines += _table(rows, align="<<>>>>><")  # text left, numbers right
+        lines.append(
+            f"{len(summary)} terms: {count['✓']} ✓  {count['⚠']} ⚠  {count['✗']} ✗, "
+            f"{sum(t['mean_off'] for t in summary)} mean-off   (OC ✓ ≥ {_OC_GOOD:.2f}, "
+            f"⚠ ≥ {_OC_WARN:.2f}; mean-off: |Δ| > {labels[0]} sd)"
+        )
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def _table(rows, align):
+    """Rows of strings as aligned text lines; `align` has one '<'/'>' per column."""
+    widths = [max(len(row[k]) for row in rows) for k in range(len(align))]
+    return [
+        "  ".join(f"{c:{a}{w}}" for c, a, w in zip(row, align, widths)).rstrip()
+        for row in rows
+    ]
 
 
 def _figure_path(outfile, tag=None):
