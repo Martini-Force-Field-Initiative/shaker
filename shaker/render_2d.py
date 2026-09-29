@@ -62,9 +62,9 @@ def render_2dMapping(
                     "BEAD2": {"type": "...", "charge": 0, "atoms": [...]},
                 }
             }
-    outfile : str or Path or None, optional
+    outfile : str or Path, optional
         Where to save the SVG (`<outfile>.svg`; only SVG can be written).
-        Overwritten if it exists; None saves nothing. Default "cg_overlay".
+        Overwritten if it exists. Default "cg_overlay".
     mode : {"circle", "atomblobs", "connected", "both"}, optional
         CG rendering style.
     size : tuple of int, optional
@@ -120,14 +120,13 @@ def render_2dMapping(
 
     Returns
     -------
-    str
-        The SVG source string. The same content is also written to ``outfile``.
+    Path
+        Path to the written SVG file.
     """
 
-    if outfile is not None:
-        outfile = _figure_path(outfile)
-        if outfile.suffix.lower() != ".svg":
-            raise ValueError(f"render_2dMapping only writes SVG, got '{outfile}'")
+    outfile = _figure_path(outfile)
+    if outfile.suffix.lower() != ".svg":
+        raise ValueError(f"render_2dMapping only writes SVG, got '{outfile}'")
     if mode not in {"circle", "atomblobs", "connected", "both"}:
         raise ValueError(
             "mode must be one of: 'circle', 'atomblobs', 'connected', 'both'"
@@ -382,10 +381,9 @@ def render_2dMapping(
     svg = parts[0] + "\n".join(overlay) + "\n</svg>" + parts[1]
     svg = _fit_canvas(svg, w, h, extents)
 
-    if outfile is not None:
-        outfile.parent.mkdir(parents=True, exist_ok=True)
-        outfile.write_text(svg, encoding="utf-8")
-    return svg
+    outfile.parent.mkdir(parents=True, exist_ok=True)
+    outfile.write_text(svg, encoding="utf-8")
+    return outfile
 
 
 def _load_mols(pdb_file, resname, net_charge):
