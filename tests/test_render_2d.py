@@ -281,13 +281,14 @@ class TestRenderedSvg:
     def _render(self, pdb, tmp_path, mapping=None, **kwargs):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            return render_2dMapping(
+            path = render_2dMapping(
                 pdb,
                 "MOL",
                 mapping or self.MAPPING,
                 outfile=tmp_path / "out.svg",
                 **kwargs,
             )
+        return path.read_text()
 
     def test_mask_references_resolve_within_the_figure(self, tutorial_pdb, tmp_path):
         """Ids are per-render, so a mask reference must not dangle."""
