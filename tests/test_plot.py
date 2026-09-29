@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from shaker import plot_bonded_distributions, set_options
+from shaker import plot_bonded_distributions, plot_sasa_dir, set_options
 from shaker._options import _OPTIONS
 from shaker.plot import _finish_figure
 
@@ -55,3 +55,15 @@ def test_plot_bonded_distributions_quiet(tmp_path):
 
     assert (tmp_path / "bonds.svg").exists()  # svg by default
     assert not plt.fignum_exists(fig.number)
+
+
+def test_plot_sasa_dir_reports_difference_from_aa(tmp_path, capsys):
+    for name, value in (("AA", 5.0), ("CG", 5.4)):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "SASA.xvg").write_text(f"@ header\n0 {value}\n1 {value}\n")
+
+    plot_sasa_dir(tmp_path, outfile=None, show=False)
+
+    assert (
+        "CG            5.40 ± 0.00   +0.40 nm²  (+8.0%)  ⚠" in capsys.readouterr().out
+    )
