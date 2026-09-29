@@ -40,7 +40,10 @@ def bonded_estimator(
     ang_tgts=None,
     harm_dihed_tgts=None,
     imp_dihed_tgts=None,
-    plot_dihed=False,
+    outfile=None,
+    formats=("svg",),
+    transparent=True,
+    show=False,
     T=300,
     constraint_threshold=25000,
     angle_cap=250.0,
@@ -78,6 +81,18 @@ def bonded_estimator(
         Improper dihedral targets to estimate. Each entry is a quartet of bead names.
         Parameters estimated from the angle distribution via the equipartition
         theorem and written as type 2 (harmonic improper).
+    outfile : str or Path or None, optional
+        Filename prefix: each proper dihedral's fit (raw potential, smoothed
+        potential and fit) is saved as `<outfile>_<B1-B2-B3-B4>.<format>`.
+        Default None (not saved).
+    formats : sequence of str, optional
+        Image formats to save, e.g. ("svg", "png", "pdf"). Default ("svg",).
+    transparent : bool, optional
+        Save with a transparent background. Default True.
+    show : bool or None, optional
+        Display each proper dihedral's fit and print its fitted terms.
+        Default False: the fits are opt-in diagnostics. None uses the
+        SHAKER-wide setting (see `set_options`).
     T : float, optional
         Temperature in Kelvin. Default is 300.
     constraint_threshold : float, optional
@@ -147,7 +162,10 @@ def bonded_estimator(
         ang_tgts=ang_tgts,
         harm_dihed_tgts=harm_dihed_tgts,
         imp_dihed_tgts=imp_dihed_tgts,
-        plot_dihed=plot_dihed,
+        outfile=outfile,
+        formats=formats,
+        transparent=transparent,
+        show=show,
         T=T,
         constraint_threshold=constraint_threshold,
         angle_cap=angle_cap,
@@ -164,7 +182,10 @@ def _estimate_bonded_from_dict(
     ang_tgts=None,
     harm_dihed_tgts=None,
     imp_dihed_tgts=None,
-    plot_dihed=False,
+    outfile=None,
+    formats=("svg",),
+    transparent=True,
+    show=False,
     T=300,
     dist_units="A",
     ang_units="deg",
@@ -195,9 +216,18 @@ def _estimate_bonded_from_dict(
         Improper dihedral targets to estimate. Each entry is a quartet of bead names.
         Parameters estimated from the angle distribution via the equipartition
         theorem and written as type 2 (harmonic improper).
-    plot_dihed : bool, optional
-        If True, plot the raw potential, smoothed potential, and fit for each
-        proper dihedral. Default is False.
+    outfile : str or Path or None, optional
+        Filename prefix: each proper dihedral's fit (raw potential, smoothed
+        potential and fit) is saved as `<outfile>_<B1-B2-B3-B4>.<format>`.
+        Default None (not saved).
+    formats : sequence of str, optional
+        Image formats to save, e.g. ("svg", "png", "pdf"). Default ("svg",).
+    transparent : bool, optional
+        Save with a transparent background. Default True.
+    show : bool or None, optional
+        Display each proper dihedral's fit and print its fitted terms.
+        Default False: the fits are opt-in diagnostics. None uses the
+        SHAKER-wide setting (see `set_options`).
     T : float, optional
         Temperature in Kelvin. Default is 300.
     dist_units : {"nm", "A"}, optional
@@ -363,7 +393,15 @@ def _estimate_bonded_from_dict(
     for tgt in harm_dihed_tgts:
         bins, hist = _get_hist("dihedrals", tgt)
         ijkl, comment = _fmt_dihedral(tgt[0], tgt[1], tgt[2], tgt[3])
-        model = fit_dihedral_workflow(bins, hist, tgt=tgt, plot=plot_dihed)
+        model = fit_dihedral_workflow(
+            bins,
+            hist,
+            tgt=tgt,
+            outfile=f"{outfile}_{'-'.join(tgt)}" if outfile else None,
+            formats=formats,
+            transparent=transparent,
+            show=show,
+        )
 
         harm_dihed_lines.append(f"; {comment or '-'.join(tgt)}")
         for i, term in enumerate(model["report"]):

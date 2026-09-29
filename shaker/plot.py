@@ -11,6 +11,8 @@ import numpy as np
 from matplotlib import gridspec
 from scipy.stats import wasserstein_distance
 
+from ._options import _resolve
+
 mpl.rcParams["figure.dpi"] = 150
 
 # NumPy 2.0 renamed trapz -> trapezoid
@@ -20,7 +22,15 @@ except AttributeError:
     _trapz = np.trapz  # type: ignore[attr-defined]
 
 
-def plot_sasa_dir(root="./SASA", xvg="SASA.xvg", kind="violin"):
+def plot_sasa_dir(
+    root="./SASA",
+    xvg="SASA.xvg",
+    kind="violin",
+    outfile="SASABar",
+    formats=("svg",),
+    transparent=True,
+    show=None,
+):
     """
     Plot SASA values from multiple simulations stored in subdirectories.
 
@@ -55,6 +65,18 @@ def plot_sasa_dir(root="./SASA", xvg="SASA.xvg", kind="violin"):
         each subdirectory. Default is "SASA.xvg".
     kind : {"violin", "overlay"}, optional
         Chart style, see above. Default is "violin".
+    outfile : str or Path or None, optional
+        Output filename stem; the figure is saved as `<outfile>.<format>` for
+        each of `formats`, or exactly as `outfile` if it already has an image
+        extension (e.g. "sasa.png"). None saves nothing. Default "SASABar".
+    formats : sequence of str, optional
+        Image formats to save, e.g. ("svg", "png", "pdf"). Default ("svg",).
+    transparent : bool, optional
+        Save with a transparent background. Default True.
+    show : bool or None, optional
+        Whether to display the figure in the notebook. None (default) uses
+        the SHAKER-wide setting (see `set_options`), which is True unless
+        changed. The figure is saved either way.
 
     Returns
     -------
@@ -65,10 +87,6 @@ def plot_sasa_dir(root="./SASA", xvg="SASA.xvg", kind="violin"):
     items : list of tuple
         `(name, value, error)` per subdirectory — mean and std SASA over
         all frames, sorted by subdirectory name.
-
-    Notes
-    -----
-    The resulting figure is saved as `SASABar.png`.
     """
     if kind not in ("violin", "overlay"):
         raise ValueError("kind must be 'violin' or 'overlay'")
@@ -76,8 +94,11 @@ def plot_sasa_dir(root="./SASA", xvg="SASA.xvg", kind="violin"):
     root = Path(root)
 
     if kind == "overlay":
-        return _plot_sasa_overlay(root, xvg)
-    return _plot_sasa_violin(root, xvg)
+        fig, ax, items = _plot_sasa_overlay(root, xvg)
+    else:
+        fig, ax, items = _plot_sasa_violin(root, xvg)
+    _finish_figure(fig, outfile, formats, transparent, show)
+    return fig, ax, items
 
 
 def _plot_sasa_violin(root, xvg):
@@ -196,7 +217,6 @@ def _plot_sasa_violin(root, xvg):
             framealpha=0.8,
         )
 
-    fig.savefig("SASABar.png", dpi=300, transparent=True, bbox_inches="tight")
     return fig, ax, items
 
 
@@ -330,8 +350,6 @@ def _plot_sasa_overlay(root, xvg, bins=60):
         framealpha=0.8,
     )
 
-    fig.savefig("SASABar.png", dpi=300, transparent=True, bbox_inches="tight")
-
     items = [(name, float(means[name]), float(vals.std())) for name, vals in entries]
     return fig, ax, items
 
@@ -341,9 +359,11 @@ def plot_bonded_distributions(
     labels=None,
     colors=None,
     outfile="cleanbonds",
+    formats=("svg",),
     transparent=True,
     show_peaks=False,
     metrics=True,
+    show=None,
 ):
     """
     Plot bonded distributions (distances, angles, dihedrals) from one or more
@@ -366,12 +386,16 @@ def plot_bonded_distributions(
     colors : list[str] | None, optional
         Line colors for each bonded dictionary. If None, matplotlib default cycle is used.
 
-    outfile : str | None, optional
-        Output filename stem. If provided, saves <outfile>.svg/.pdf/.png.
-        If None, nothing is saved.
+    outfile : str | Path | None, optional
+        Output filename stem; saves `<outfile>.<format>` for each of
+        `formats`, or exactly `outfile` if it already has an image extension
+        (e.g. "bonds.png"). If None, nothing is saved. Default "cleanbonds".
+
+    formats : sequence of str, optional
+        Image formats to save, e.g. ("svg", "png", "pdf"). Default ("svg",).
 
     transparent : bool, optional
-        Whether to save figures with transparent background.
+        Save with a transparent background. Default True.
 
     show_peaks : bool, optional
         Whether to annotate the peak position of each histogram.
@@ -380,6 +404,11 @@ def plot_bonded_distributions(
         Whether to compute and display Wasserstein distance and overlap coefficient
         for each distribution against the reference (first) dataset, and shade
         the overlapping region between curves. Default is True.
+
+    show : bool | None, optional
+        Whether to display the figure in the notebook. None (default) uses
+        the SHAKER-wide setting (see `set_options`), which is True unless
+        changed. The figure is saved either way.
 
     Returns
     -------
@@ -633,12 +662,35 @@ def plot_bonded_distributions(
             ax.set_xlabel(config[cat]["xlabel"], fontsize=9)
             ax.set_ylabel("Prob. density")
 
-    if outfile is not None:
-        fig.savefig(f"{outfile}.svg", transparent=transparent)
-        fig.savefig(f"{outfile}.pdf", transparent=transparent)
-        fig.savefig(f"{outfile}.png", transparent=transparent, dpi=300)
-
+    _finish_figure(fig, outfile, formats, transparent, show)
     return fig
+
+
+def _finish_figure(fig, outfile, formats, transparent, show):
+    """
+    Save `fig`, then close it unless it should be shown. Returns the
+    resolved `show`.
+
+    `outfile` is a stem saved once per format (`<outfile>.<fmt>`), or used
+    as-is if it already ends in an image extension; None saves nothing.
+    Closing is what stops Jupyter's inline backend from rendering the
+    figure at the end of the cell; the returned Figure object still works.
+    """
+    if outfile is not None:
+        path = Path(outfile)
+        if path.suffix[1:].lower() in fig.canvas.get_supported_filetypes():
+            paths = [path]
+        else:
+            paths = [path.with_name(f"{path.name}.{fmt}") for fmt in formats]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for p in paths:
+            # dpi only matters for raster formats (png, jpg, ...).
+            fig.savefig(p, transparent=transparent, dpi=300, bbox_inches="tight")
+
+    show = _resolve(show, "show")
+    if not show:
+        plt.close(fig)
+    return show
 
 
 def _read_SASA_timeseries(xvg):

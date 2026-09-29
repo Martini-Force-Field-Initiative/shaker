@@ -219,7 +219,7 @@ reference structural distributions with the overlap matrix.
    view  # displays an interactive nglview widget in the notebook
 
    # Pairwise overlap matrix between AA and CG intra-bead distance distributions
-   fig = shaker.assess_overlap_matrix(u_aa, u_cg, resname="MOL")
+   oc, fig, axes = shaker.assess_overlap_matrix(u_aa, u_cg, resname="MOL")
 
 The overlap matrix produces an N×N heatmap of overlap coefficients (0–1) for
 every bead pair, plus a per-bead mean column on the right. Values close to 1

@@ -41,6 +41,7 @@ __all__ = [
     "run_SASA",
     "run_status",
     "sasa",
+    "set_options",
     "system_builders",
     "vsites",
     "write_initial_CGitp",
@@ -61,6 +62,7 @@ from . import (
     system_builders,
     vsites,
 )
+from ._options import set_options
 from .estimator import bonded_estimator
 from .itp import write_initial_CGitp
 from .mapper import map_aa2cg

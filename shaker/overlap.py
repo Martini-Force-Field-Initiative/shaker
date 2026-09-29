@@ -7,6 +7,8 @@ from matplotlib import gridspec, ticker
 from MDAnalysis.analysis.distances import self_distance_array
 from tqdm.autonotebook import tqdm
 
+from .plot import _finish_figure
+
 
 def _make_overlap_cmap():
     rdylgn = plt.get_cmap("RdYlGn")
@@ -248,9 +250,11 @@ def assess_overlap_matrix(
     vmax=1,
     cell_fontsize=11,
     title="Intra-bead Distance Overlap",
-    plot=True,
-    save_npy=False,
-    outname="",
+    save_npy=None,
+    outfile=None,
+    formats=("svg",),
+    transparent=True,
+    show=None,
 ):
     """
     Assess CG parameterisation quality by comparing intra-bead distance
@@ -292,15 +296,22 @@ def assess_overlap_matrix(
         Font size for overlap values inside each cell (default: 11).
     title : str, optional
         Title for the overlap matrix plot.
-    plot : bool, optional
-        If true, plots overlap matrix figure. Otherwise, simply returns the
-        numerical matrix as part of the overlap_results dict.
-    save_npy : bool, optional
-        If True, saves raw and histogram arrays to .npy files.
-    outname : str, optional
-        Prefix for saved files. If provided, the figure is saved as
-        ``{outname}_overlap_matrix.png`` and histogram arrays as
-        ``{outname}_aa/cg_intra_bead_distances_*.npy``.
+    save_npy : str or None, optional
+        If given, a filename prefix: raw distances and histograms are saved
+        as ``{save_npy}_aa/cg_intra_bead_distances_raw/hists.npy``. Default
+        None (not saved).
+    outfile : str or Path or None, optional
+        Output filename stem; the figure is saved as `<outfile>.<format>` for
+        each of `formats`, or exactly as `outfile` if it already has an image
+        extension (e.g. "overlap.png"). Default None (not saved).
+    formats : sequence of str, optional
+        Image formats to save, e.g. ("svg", "png", "pdf"). Default ("svg",).
+    transparent : bool, optional
+        Save with a transparent background. Default True.
+    show : bool or None, optional
+        Whether to display the figure in the notebook. None (default) uses
+        the SHAKER-wide setting (see `set_options`), which is True unless
+        changed. The figure is saved either way.
 
     Returns
     -------
@@ -313,7 +324,7 @@ def assess_overlap_matrix(
     Examples
     --------
     >>> oc, fig, axes = assess_overlap_matrix(u_aa, u_cg, resname='MOL',
-    ...                                       outname='MOL')
+    ...                                       outfile='MOL_overlap')
 
     >>> oc, fig, axes = assess_overlap_matrix(u_aa, u_cg, resname='MOL',
     ...                                       bead_names=['BB', 'SC1', 'SC2'])
@@ -342,8 +353,8 @@ def assess_overlap_matrix(
         stop=stop,
         stride=stride,
         bins_dist=bins_dist,
-        save_npy=save_npy,
-        outname=outname + "_aa" if outname else "",
+        save_npy=save_npy is not None,
+        outname=f"{save_npy}_aa",
     )
     results_cg = _measure_intra_bead_distances(
         u_cg,
@@ -353,18 +364,13 @@ def assess_overlap_matrix(
         stop=stop,
         stride=stride,
         bins_dist=bins_dist,
-        save_npy=save_npy,
-        outname=outname + "_cg" if outname else "",
+        save_npy=save_npy is not None,
+        outname=f"{save_npy}_cg",
     )
     oc = _compute_overlap_matrix(results_aa, results_cg)
 
-    if not plot:
-        return oc, None, None
-    else:
-        fig, axes = _plot_overlap_matrix(
-            oc, vmin=vmin, vmax=vmax, title=title, cell_fontsize=cell_fontsize
-        )
-        if outname:
-            fig.savefig(f"{outname}_overlap_matrix.png", dpi=150)
-
-        return oc, fig, axes
+    fig, axes = _plot_overlap_matrix(
+        oc, vmin=vmin, vmax=vmax, title=title, cell_fontsize=cell_fontsize
+    )
+    _finish_figure(fig, outfile, formats, transparent, show)
+    return oc, fig, axes
