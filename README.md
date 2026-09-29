@@ -179,7 +179,7 @@ view = shaker.render_ensemble("sim.gro", "sim.xtc", n_frames=50)
 view  # displays an interactive nglview widget in the notebook
 
 # Pairwise overlap matrix between AA and CG intra-bead distance distributions
-fig = shaker.assess_overlap_matrix(u_aa, u_cg, resname="MOL")
+oc, fig, axes = shaker.assess_overlap_matrix(u_aa, u_cg, resname="MOL")
 ```
 
 The overlap matrix produces an N×N heatmap of overlap coefficients (0–1) for

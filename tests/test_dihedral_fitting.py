@@ -182,19 +182,19 @@ class TestFitDihedralWorkflow:
         bins = np.linspace(-180, 180, 72, endpoint=False)
         # Simple peaked histogram
         hist = np.exp(-0.5 * ((bins - 0) / 30) ** 2) + 0.01
-        result = fit_dihedral_workflow(bins, hist, plot=False)
+        result = fit_dihedral_workflow(bins, hist)
         for key in ("mults", "amps", "potential", "smooth_potential", "report"):
             assert key in result
 
     def test_report_is_list_of_strings(self):
         bins = np.linspace(-180, 180, 72, endpoint=False)
         hist = np.exp(-0.5 * ((bins) / 30) ** 2) + 0.01
-        result = fit_dihedral_workflow(bins, hist, plot=False)
+        result = fit_dihedral_workflow(bins, hist)
         assert isinstance(result["report"], list)
         assert all(isinstance(r, str) for r in result["report"])
 
     def test_smooth_potential_same_length(self):
         bins = np.linspace(-180, 180, 72, endpoint=False)
         hist = np.exp(-0.5 * ((bins) / 30) ** 2) + 0.01
-        result = fit_dihedral_workflow(bins, hist, plot=False)
+        result = fit_dihedral_workflow(bins, hist)
         assert len(result["smooth_potential"]) == len(bins)
