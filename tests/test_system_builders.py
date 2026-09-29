@@ -1,6 +1,7 @@
 """Tests for shaker/system_builders.py — iteration checkpointing."""
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,7 @@ from pathlib import Path
 from shaker.system_builders import (
     _checkpoint,
     _run_mdrun,
+    _StageProgress,
     list_iterations,
     run_status,
 )
@@ -165,9 +167,15 @@ class TestRunMdrun:
         _run_mdrun(self._fake("print('step 100, will finish soon')"))
         assert "step 100" in capsys.readouterr().out
 
-    def test_nonzero_exit_raises(self):
-        with pytest.raises(subprocess.CalledProcessError):
-            _run_mdrun(self._fake("import sys; sys.exit(1)"))
+    def test_nonzero_exit_raises_with_output_tail(self, tmp_path, capsys):
+        code = "import sys; print('bad topology'); sys.exit(1)"
+        with open(tmp_path / "gmx_run.log", "w") as log:
+            with pytest.raises(subprocess.CalledProcessError, match="bad topology"):
+                _run_mdrun(self._fake(code), log=log)
+
+        # Quiet: output went to the log, not the cell.
+        assert "bad topology" in (tmp_path / "gmx_run.log").read_text()
+        assert capsys.readouterr().out == ""
 
     def test_kills_process_stuck_after_fatal_error(self):
         code = "import time; print('Fatal error:', flush=True); time.sleep(60)"
@@ -199,9 +207,8 @@ class TestRunStatus:
         assert prod["steps_done"] == prod["nsteps"] == 10000000
         assert status["rel"] is None and status["done"]
         out = capsys.readouterr().out
-        assert "min   3491 steps   Fmax 24.8 (target 10)\n" in out
-        assert "200.0/200.0 ns   31733 ns/day   0:09:05" in out
-        assert "⚠" not in out.splitlines()[2]
+        assert "  min    3491 steps   Fmax 24.8 (target 10)   ✓\n" in out
+        assert "  prod   200.0/200.0 ns   31733 ns/day   0:09:05   ✓\n" in out
 
     def test_flags_truncated_run_with_lincs_warnings(self, tmp_path, capsys):
         log = FINISHED_LOG.read_text()
@@ -215,4 +222,16 @@ class TestRunStatus:
 
         out = capsys.readouterr().out
         assert "60.0/200.0 ns" in out
-        assert "stopped early" in out and "1 LINCS warnings" in out
+        assert "⚠ stopped early · 1 LINCS warnings" in out
+
+
+def test_stage_progress_is_append_only(tmp_path, capsys):
+    shutil.copy(FINISHED_LOG, tmp_path / "p.log")  # nsteps = 10000000
+    progress = _StageProgress(tmp_path / "p.log")
+
+    for step in (100, 600000, 2500000, 5000000, 7600000, 9999900):
+        progress(f"\rstep {step}, will finish soon")
+
+    out = capsys.readouterr().out
+    assert re.fullmatch(r"ETA \d\d:\d\d \(.+\) · 25 · 50 · 75", out)
+    assert len(out) + len(progress.pad()) == _StageProgress.WIDTH
