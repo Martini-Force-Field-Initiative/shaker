@@ -30,6 +30,7 @@ def plot_sasa_dir(
     outfile="SASABar",
     transparent=True,
     show=None,
+    verbose=True,
 ):
     """
     Plot SASA values from multiple simulations stored in subdirectories.
@@ -75,6 +76,11 @@ def plot_sasa_dir(
         Whether to display the figure in the notebook. None (default) uses
         the SHAKER-wide setting (see `set_options`), which is True unless
         changed. The figure is saved either way.
+    verbose : bool, optional
+        If True (default), print a short report: mean ± std per
+        subdirectory and, if "AA" is present, the difference from AA in nm²
+        and %, marked ✓ (within 5 %), ⚠ (5–10 %) or ✗ (>10 %), the same
+        thresholds as the plot's bands. Printed regardless of `show`.
 
     Returns
     -------
@@ -96,7 +102,35 @@ def plot_sasa_dir(
     else:
         fig, ax, items = _plot_sasa_violin(root, xvg)
     _finish_figure(fig, outfile, transparent, show)
+    if verbose:
+        print(_sasa_report(items))
     return fig, ax, items
+
+
+def _sasa_report(items, reference="AA"):
+    """
+    Text report for `plot_sasa_dir`: one line per entry, with the difference
+    from `reference` (if present) in nm² and %, e.g.::
+
+        SASA (nm²)       mean ± std   vs AA
+          AA           5.12 ± 0.08
+          CG_Mapped    4.98 ± 0.10   -0.14 nm²  (-2.7%)  ✓
+    """
+    title = "SASA (nm²)"
+    width = max(len(title), *(len(name) for name, _, _ in items))
+    ref = {name: mean for name, mean, _ in items}.get(reference)
+    lines = [
+        f"{title:<{width + 2}}  {'mean ± std':>13}"
+        + (f"   vs {reference}" if ref else "")
+    ]
+    for name, mean, std in items:
+        line = f"  {name:<{width}}  {mean:6.2f} ± {std:4.2f}"
+        if ref and name != reference:
+            rel = (mean - ref) / ref
+            mark = "✓" if abs(rel) <= 0.05 else "⚠" if abs(rel) <= 0.10 else "✗"
+            line += f"   {mean - ref:+.2f} nm²  ({rel:+.1%})  {mark}"
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _plot_sasa_violin(root, xvg):
