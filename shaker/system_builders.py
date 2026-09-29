@@ -417,7 +417,7 @@ def runSim(
     )
 
     if cleanTraj:
-        _traj_cleanup("p.gro", "p.xtc", "p.tpr")
+        _traj_cleanup("p.gro", "p.xtc", "p.tpr", gmx_loc=gmx_loc)
         _checkpoint(mapping=mapping, keep_last=keep_last)
 
 
