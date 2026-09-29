@@ -6,15 +6,14 @@ import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
-
-from pathlib import Path
 
 from shaker.system_builders import (
     _checkpoint,
     _run_mdrun,
-    _StageProgress,
+    _StageLine,
     list_iterations,
     run_status,
 )
@@ -169,9 +168,11 @@ class TestRunMdrun:
 
     def test_nonzero_exit_raises_with_output_tail(self, tmp_path, capsys):
         code = "import sys; print('bad topology'); sys.exit(1)"
-        with open(tmp_path / "gmx_run.log", "w") as log:
-            with pytest.raises(subprocess.CalledProcessError, match="bad topology"):
-                _run_mdrun(self._fake(code), log=log)
+        with (
+            open(tmp_path / "gmx_run.log", "w") as log,
+            pytest.raises(subprocess.CalledProcessError, match="bad topology"),
+        ):
+            _run_mdrun(self._fake(code), log=log)
 
         # Quiet: output went to the log, not the cell.
         assert "bad topology" in (tmp_path / "gmx_run.log").read_text()
@@ -187,7 +188,9 @@ class TestRunMdrun:
     def test_kills_silent_process(self):
         start = time.monotonic()
         with pytest.raises(RuntimeError, match="no output"):
-            _run_mdrun(self._fake("import time; time.sleep(60)"), hang_timeout=1, poll=0.1)
+            _run_mdrun(
+                self._fake("import time; time.sleep(60)"), hang_timeout=1, poll=0.1
+            )
         assert time.monotonic() - start < 15
 
 
@@ -214,7 +217,8 @@ class TestRunStatus:
         log = FINISHED_LOG.read_text()
         log = log.replace("Statistics over 10000001", "Statistics over 3000001")
         log = log.replace(
-            "Writing checkpoint", "Step 0, time 0 (ps)  LINCS WARNING\nWriting checkpoint"
+            "Writing checkpoint",
+            "Step 0, time 0 (ps)  LINCS WARNING\nWriting checkpoint",
         )
         (tmp_path / "p.log").write_text(log)
 
@@ -225,13 +229,14 @@ class TestRunStatus:
         assert "⚠ stopped early · 1 LINCS warnings" in out
 
 
-def test_stage_progress_is_append_only(tmp_path, capsys):
+def test_stage_line_is_append_only(tmp_path, capsys):
     shutil.copy(FINISHED_LOG, tmp_path / "p.log")  # nsteps = 10000000
-    progress = _StageProgress(tmp_path / "p.log")
+    line = _StageLine("", tmp_path / "p.log")
 
     for step in (100, 600000, 2500000, 5000000, 7600000, 9999900):
-        progress(f"\rstep {step}, will finish soon")
+        line(f"\rstep {step}, will finish soon")
+    line.finish("RESULT")
 
     out = capsys.readouterr().out
-    assert re.fullmatch(r"ETA \d\d:\d\d \(.+\) · 25 · 50 · 75", out)
-    assert len(out) + len(progress.pad()) == _StageProgress.WIDTH
+    assert re.match(r"ETA \d\d:\d\d \(.+\) · 25 · 50 · 75 +RESULT\n$", out)
+    assert out.index("RESULT") == _StageLine.WIDTH

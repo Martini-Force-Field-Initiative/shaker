@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 import warnings
-from datetime import datetime, timedelta
+from datetime import timedelta
 from importlib.resources import files
 from pathlib import Path
 
@@ -21,6 +21,9 @@ import MDAnalysis as md
 import numpy as np
 
 _ITER_RE = re.compile(r"^iter_(\d+)_\d{8}_\d{6}$")
+# runSim stage prefixes (-deffnm) and their display names.
+_STAGES = {"m": "min", "r": "rel", "p": "prod"}
+_EM_INTEGRATORS = ("steep", "cg", "l-bfgs")
 
 
 def prepare_setup_water(
@@ -62,8 +65,13 @@ def prepare_setup_water(
         Martini solvent ITP file. If None, the SHAKER-distributed default is used.
     IonsITP : str or Path, optional
         Martini ions ITP file. If None, the SHAKER-distributed default is used.
+    resname : str, optional
+        Residue name of the solute, used in the `[ molecules ]` section of
+        `topol.top`. If None, it is read from `initial_structure`.
     NaCL_Conc : float, optional
-        Target NaCl concentration (mol/L). Default is 0.15.
+        Target NaCl concentration (mol/L). Default is 0.15. Converted to a
+        number of Na+/Cl- pairs from the water in the box: each Martini W
+        bead stands for 4 water molecules, and pure water is 55.5 M.
     gmx_loc : str, optional
         Prefix/path to the GROMACS executable (e.g. "/usr/local/bin/" or "").
 
@@ -77,7 +85,8 @@ def prepare_setup_water(
     4. Neutralize the system with counterions using ``gmx genion``.
     5. Add additional NaCl to reach the target concentration.
 
-    All GROMACS stdout/stderr are appended to `gmx_setup_water.log`.
+    All GROMACS output from these steps is written to `gmx_setup_water.log`,
+    which is overwritten on each call.
     """
 
     ## normalize paths
@@ -210,6 +219,8 @@ def prepare_setup_water(
             )
             u_mem = md.Universe("memion.gro")
         Waternumber = len(u_mem.select_atoms("resname W").residues)
+        # Ion pairs for the target concentration: W beads × 4 waters each,
+        # scaled by NaCl molarity relative to pure water (55.5 M).
         naclNUM = int((NaCL_Conc * Waternumber * 4) / 55.5)
 
         _run(
@@ -295,9 +306,12 @@ def runSim(
     gmx_loc : str, optional
         Prefix/path to the GROMACS executable (e.g. "/usr/local/bin/" or "").
     cleanTraj : bool, optional
-        If True, post-process the production trajectory using `_traj_cleanup`.
+        If True (default), strip water and ions from the production
+        trajectory and make molecules whole, writing `pbc.xtc` and a
+        first-frame `pbc.pdb`. Needed for checkpointing (`keep_last`).
     cleanOldRun : bool, optional
-        If True, remove files from previous runs using `_clean_old_files()`.
+        If True (default), first delete the outputs of a previous run in this
+        folder: m/r/p files, `pbc.*`, and `step*`/`crash*` files.
     mapping : dict, optional
         SHAKER mapping dictionary for the simulated molecule. If provided
         (and checkpointing is enabled via `keep_last`), saved as
@@ -373,8 +387,6 @@ def runSim(
     env = os.environ.copy()
     env["GMX_MAXBACKUP"] = "-1"
 
-    # Quiet: all gmx output goes to gmx_run.log; errors still show its tail.
-    log_ctx = contextlib.nullcontext() if verbose else open("gmx_run.log", "w")
     # (prefix, mdp, input coordinates, mdrun options); _STAGES names them.
     stages = (
         ("m", minMDP, "memion_2.gro", minOPT),  # minimize
@@ -383,14 +395,16 @@ def runSim(
     )
     if not verbose:
         print("runSim · output → gmx_run.log")
-    with log_ctx as log:
+    with contextlib.ExitStack() as stack:
+        # Quiet: all gmx output goes to gmx_run.log; errors still show its tail.
+        log = None if verbose else stack.enter_context(open("gmx_run.log", "w"))
         for prefix, mdp, coords, opt in stages:
-            # Quiet: the stage's line is started now and grows as it runs
-            # (ETA, 25 · 50 · 75), then gets its result appended.
             label = f"  {_STAGES[prefix]:<6} "
-            progress = None if verbose or prefix == "m" else _StageProgress(f"{prefix}.log")
+            # Quiet: the stage's line starts now and grows while it runs.
+            # Minimization gets no % (it usually stops well before nsteps).
+            line = None
             if not verbose:
-                print(label, end="", flush=True)
+                line = _StageLine(label, None if prefix == "m" else f"{prefix}.log")
             try:
                 _run(
                     [
@@ -415,18 +429,18 @@ def runSim(
                     log=log,
                     env=env,
                     hang_timeout=hang_timeout,
-                    on_output=progress,
+                    on_output=line,
                 )
             except BaseException:
-                # End the half-written line, so the error starts on its own.
-                if not verbose:
-                    print((progress.pad() if progress else "") + "✗ failed", flush=True)
+                if line is not None:  # end the line, so the error starts on its own
+                    line.finish("✗ failed")
                 raise
-            # Result line, e.g. so a -maxh-truncated production doesn't go
-            # unnoticed. In verbose mode it follows mdrun's own output.
+            # Result, e.g. so a -maxh-truncated production doesn't go unnoticed.
             result = _stage_result(_stage_report(f"{prefix}.log"))
-            pad = progress.pad() if progress else ""
-            print(("" if not verbose else label) + pad + result)
+            if line is not None:
+                line.finish(result)
+            else:  # verbose: after mdrun's own output
+                print(label + result)
 
     if cleanTraj:
         _traj_cleanup("p.gro", "p.xtc", "p.tpr", gmx_loc=gmx_loc)
@@ -499,9 +513,7 @@ def run_status(run_dir=".", verbose=True):
         name: _stage_report(run_dir / f"{prefix}.log")
         for prefix, name in _STAGES.items()
     }
-    status["done"] = (run_dir / "pbc.pdb").is_file() and (
-        run_dir / "pbc.xtc"
-    ).is_file()
+    status["done"] = (run_dir / "pbc.pdb").is_file() and (run_dir / "pbc.xtc").is_file()
     status["crash_files"] = sorted(
         p.name for pattern in ("step*.pdb", "crash*") for p in run_dir.glob(pattern)
     )
@@ -518,10 +530,6 @@ def run_status(run_dir=".", verbose=True):
     return status
 
 
-_STAGES = {"m": "min", "r": "rel", "p": "prod"}
-_EM_INTEGRATORS = ("steep", "cg", "l-bfgs")
-
-
 def _stage_report(log_path):
     """
     Pull the few numbers worth reporting out of an mdrun .log (None if missing).
@@ -536,13 +544,15 @@ def _stage_report(log_path):
     text = path.read_text(errors="replace")
 
     def last(pattern, cast=float):
-        found = re.findall(pattern, text, re.M)
+        found = re.findall(pattern, text, re.MULTILINE)
         return cast(found[-1]) if found else None
 
     integrator = last(r"^\s+integrator\s+=\s+(\S+)", str)
     minimization = integrator in _EM_INTEGRATORS
     # -nsteps on the command line overrides the mdp value.
-    nsteps = last(r"Overriding nsteps with value passed on the command line: (-?\d+)", int)
+    nsteps = last(
+        r"Overriding nsteps with value passed on the command line: (-?\d+)", int
+    )
     if nsteps is None:
         nsteps = last(r"^\s+nsteps\s+=\s+(-?\d+)", int)
     if minimization:
@@ -611,17 +621,22 @@ def _stage_result(rep):
     return "   ".join(parts)
 
 
-class _StageProgress:
+class _StageLine:
     """
-    Append-only progress for one MD stage in quiet mode: an ETA once ~5% is
-    done, then 25 · 50 · 75. Fed the `mdrun -v` output by `_run_mdrun`; the
-    planned step count comes from the stage .log header. Never rewrites a
-    line (no \\r), so agents reading raw output get a few tokens, not a flood.
+    One stage's line in quiet mode, append-only (never rewritten with \\r, so
+    agents reading raw output get a few tokens, not a flood).
+
+    Created → prints the stage label. Called with `mdrun -v` output (by
+    `_run_mdrun`) → appends an ETA once ~5% is done, then 25 · 50 · 75; the
+    planned step count comes from the stage .log header. `finish` → appends
+    the result, padded so results line up across stages, and ends the line.
     """
 
-    WIDTH = 42  # pad to this so the result columns line up across stages
+    WIDTH = 42  # progress column width, so result columns line up
 
-    def __init__(self, log_path):
+    def __init__(self, label, log_path=None):
+        """`log_path` None: no progress, just label + result."""
+        print(label, end="", flush=True)
         self.log_path = log_path
         self.start = time.monotonic()
         self.nsteps = None
@@ -630,6 +645,8 @@ class _StageProgress:
         self.printed = 0
 
     def __call__(self, text):
+        if self.log_path is None:
+            return
         steps = re.findall(r"step (\d+)", text)
         if not steps:
             return
@@ -643,8 +660,8 @@ class _StageProgress:
         if not self.eta_shown and 0.05 <= frac < 1:
             elapsed = time.monotonic() - self.start
             left = elapsed * (1 - frac) / frac
-            eta = datetime.now() + timedelta(seconds=left)
-            self._emit(f"ETA {eta:%H:%M} ({_duration(left)})")
+            eta = time.strftime("%H:%M", time.localtime(time.time() + left))
+            self._emit(f"ETA {eta} ({_duration(left)})")
             self.eta_shown = True
         while self.next_pct < 100 and frac * 100 >= self.next_pct:
             self._emit(f"{self.next_pct}")
@@ -656,9 +673,9 @@ class _StageProgress:
         print(text, end="", flush=True)
         self.printed += len(text)
 
-    def pad(self):
-        """Spaces to put after the progress so the result column lines up."""
-        return " " * max(3, self.WIDTH - self.printed) if self.printed else ""
+    def finish(self, text):
+        pad = " " * max(3, self.WIDTH - self.printed) if self.printed else ""
+        print(pad + text, flush=True)
 
 
 def _duration(seconds):
@@ -680,10 +697,10 @@ def _run(cmd, *, log=None, env=None, input_text=None, cwd=None):
     """
     try:
         subprocess.run(
-        cmd,
-        input=input_text,
-        # No input → give it EOF, so a tool that unexpectedly prompts fails
-        # instead of waiting forever.
+            cmd,
+            input=input_text,
+            # No input → give it EOF, so a tool that unexpectedly prompts
+            # fails instead of waiting forever.
             stdin=subprocess.DEVNULL if input_text is None else None,
             text=input_text is not None,
             stdout=log,
@@ -736,8 +753,10 @@ def _run_mdrun(
     This relies on `mdrun -v`, whose progress lines arrive every few
     seconds; the stage .log is written too rarely to be useful. A non-zero
     exit raises CalledProcessError (with the output tail), as `_run` does.
-    `on_output`, if given, is called with each chunk of output (progress). mdrun runs in its own
-    process group and is always killed on the way out, Ctrl-C included.
+
+    `on_output`, if given, is called with each chunk of output (used for
+    progress). mdrun runs in its own process group and is always killed on
+    the way out, Ctrl-C included.
     """
     # Popen only starts mdrun; the loop below is what keeps the cell blocked.
     # Own session/process group → Ctrl-C in the notebook doesn't reach mdrun
@@ -966,8 +985,7 @@ def _checkpoint(mapping=None, itp_glob="*.itp", keep_last=-1):
     existing = list_iterations(cwd)
     next_idx = (int(_ITER_RE.match(existing[-1].name).group(1)) + 1) if existing else 0
 
-    local_tz = datetime.now().astimezone().tzinfo
-    stamp = datetime.now(local_tz).strftime("%Y%m%d_%H%M%S")
+    stamp = time.strftime("%Y%m%d_%H%M%S")  # local time
     iter_dir = cwd / f"iter_{next_idx}_{stamp}"
     iter_dir.mkdir()
 
