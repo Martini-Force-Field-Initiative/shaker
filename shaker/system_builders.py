@@ -1,5 +1,6 @@
 """GROMACS simulation setup and execution."""
 
+import contextlib
 import glob
 import json
 import os
@@ -273,6 +274,7 @@ def runSim(
     mapping=None,
     keep_last=-1,
     hang_timeout=600,
+    verbose=False,
 ):
     """
     Run a standard Martini simulation pipeline (minimization → relaxation → production).
@@ -316,6 +318,11 @@ def runSim(
         as hung, killed, and a RuntimeError raised. Default is 600. None
         disables this check. Independently, an `mdrun` that prints a fatal
         error but does not exit is always killed after a short grace period.
+    verbose : bool, optional
+        If False (default), GROMACS output goes to `gmx_run.log` and only one
+        line per stage is printed: progress (ETA, 25 · 50 · 75) while it runs,
+        then its result. A failing command raises with the last lines of
+        output. If True, stream the full GROMACS output instead.
 
     Notes
     -----
@@ -344,86 +351,64 @@ def runSim(
     env = os.environ.copy()
     env["GMX_MAXBACKUP"] = "-1"
 
-    ### Minimize the system
-    _run(
-        [
-            gmx,
-            "grompp",
-            "-f",
-            str(minMDP),
-            "-c",
-            "memion_2.gro",
-            "-p",
-            "topol.top",
-            "-o",
-            "m.tpr",
-            "-maxwarn",
-            str(maxwarn),
-        ],
-        env=env,
+    # Quiet: all gmx output goes to gmx_run.log; errors still show its tail.
+    log_ctx = contextlib.nullcontext() if verbose else open("gmx_run.log", "w")
+    # (prefix, mdp, input coordinates, mdrun options); _STAGES names them.
+    stages = (
+        ("m", minMDP, "memion_2.gro", minOPT),  # minimize
+        ("r", relMDP, "m.gro", relOPT),  # relax
+        ("p", prodMDP, "r.gro", prodOPT),  # production
     )
-    _run_mdrun(
-        [gmx, "mdrun", "-v", "-deffnm", "m", *shlex.split(minOPT)],
-        env=env,
-        hang_timeout=hang_timeout,
-    )
-
-    ### Relax the system
-    _run(
-        [
-            gmx,
-            "grompp",
-            "-f",
-            str(relMDP),
-            "-c",
-            "m.gro",
-            "-p",
-            "topol.top",
-            "-o",
-            "r.tpr",
-            "-maxwarn",
-            str(maxwarn),
-        ],
-        env=env,
-    )
-    _run_mdrun(
-        [gmx, "mdrun", "-v", "-deffnm", "r", *shlex.split(relOPT)],
-        env=env,
-        hang_timeout=hang_timeout,
-    )
-
-    ### Production Sim
-    _run(
-        [
-            gmx,
-            "grompp",
-            "-f",
-            str(prodMDP),
-            "-c",
-            "r.gro",
-            "-p",
-            "topol.top",
-            "-o",
-            "p.tpr",
-            "-maxwarn",
-            str(maxwarn),
-        ],
-        env=env,
-    )
-    _run_mdrun(
-        [gmx, "mdrun", "-v", "-deffnm", "p", *shlex.split(prodOPT)],
-        env=env,
-        hang_timeout=hang_timeout,
-    )
+    if not verbose:
+        print("runSim · output → gmx_run.log")
+    with log_ctx as log:
+        for prefix, mdp, coords, opt in stages:
+            # Quiet: the stage's line is started now and grows as it runs
+            # (ETA, 25 · 50 · 75), then gets its result appended.
+            label = f"  {_STAGES[prefix]:<6} "
+            progress = None if verbose or prefix == "m" else _StageProgress(f"{prefix}.log")
+            if not verbose:
+                print(label, end="", flush=True)
+            try:
+                _run(
+                    [
+                        gmx,
+                        "grompp",
+                        "-f",
+                        str(mdp),
+                        "-c",
+                        coords,
+                        "-p",
+                        "topol.top",
+                        "-o",
+                        f"{prefix}.tpr",
+                        "-maxwarn",
+                        str(maxwarn),
+                    ],
+                    log=log,
+                    env=env,
+                )
+                _run_mdrun(
+                    [gmx, "mdrun", "-v", "-deffnm", prefix, *shlex.split(opt)],
+                    log=log,
+                    env=env,
+                    hang_timeout=hang_timeout,
+                    on_output=progress,
+                )
+            except BaseException:
+                # End the half-written line, so the error starts on its own.
+                if not verbose:
+                    print((progress.pad() if progress else "") + "✗ failed", flush=True)
+                raise
+            # Result line, e.g. so a -maxh-truncated production doesn't go
+            # unnoticed. In verbose mode it follows mdrun's own output.
+            result = _stage_result(_stage_report(f"{prefix}.log"))
+            pad = progress.pad() if progress else ""
+            print(("" if not verbose else label) + pad + result)
 
     if cleanTraj:
         _traj_cleanup("p.gro", "p.xtc", "p.tpr", gmx_loc=gmx_loc)
         _checkpoint(mapping=mapping, keep_last=keep_last)
-
-    # Short recap, so e.g. a -maxh-truncated production doesn't go unnoticed.
-    print()
-    for prefix, name in _STAGES.items():
-        print(_stage_line(name, _stage_report(f"{prefix}.log")))
 
 
 def list_iterations(run_dir):
@@ -502,10 +487,10 @@ def run_status(run_dir=".", verbose=True):
 
     if verbose:
         for name in _STAGES.values():
-            print(_stage_line(name, status[name]))
+            print(f"  {name:<6} {_stage_result(status[name])}")
         crash = ", ".join(status["crash_files"]) or "none"
         print(
-            f"cleaned traj: {'yes' if status['done'] else 'no'}   "
+            f"  cleaned traj: {'yes' if status['done'] else 'no'}   "
             f"iterations: {len(status['iterations'])}   crash files: {crash}"
         )
     return status
@@ -571,27 +556,27 @@ def _stage_report(log_path):
     }
 
 
-def _stage_line(name, rep):
+def _stage_result(rep):
     """
-    One human-readable line for a `_stage_report` dict.
+    One-line result for a `_stage_report` dict, ending in ✓ or ⚠ + flags.
     """
     if rep is None:
-        return f"{name:<5} no log"
+        return "no log"
 
+    parts = []
     if rep["integrator"] in _EM_INTEGRATORS:
-        body = f"{rep['steps_done']} steps" if rep["steps_done"] else ""
+        if rep["steps_done"]:
+            parts.append(f"{rep['steps_done']} steps")
         if rep["fmax"] is not None:
-            body += f"   Fmax {rep['fmax']:.1f} (target {rep['emtol']:g})"
+            parts.append(f"Fmax {rep['fmax']:.1f} (target {rep['emtol']:g})")
     elif rep["steps_done"] is not None and rep["dt"] and rep["nsteps"]:
         done_ns = rep["steps_done"] * rep["dt"] / 1000
         total_ns = rep["nsteps"] * rep["dt"] / 1000
-        body = f"{done_ns:.1f}/{total_ns:.1f} ns"
-    else:
-        body = ""
+        parts.append(f"{done_ns:.1f}/{total_ns:.1f} ns")
     if rep["ns_per_day"]:
-        body += f"   {rep['ns_per_day']:.0f} ns/day"
+        parts.append(f"{rep['ns_per_day']:.0f} ns/day")
     if rep["wall_s"]:
-        body += f"   {timedelta(seconds=round(rep['wall_s']))}"
+        parts.append(str(timedelta(seconds=round(rep["wall_s"]))))
 
     flags = []
     if not rep["finished"]:
@@ -600,42 +585,136 @@ def _stage_line(name, rep):
         flags.append("stopped early")
     if rep["lincs_warnings"]:
         flags.append(f"{rep['lincs_warnings']} LINCS warnings")
-    return f"{name:<5} {body.strip()}" + "".join(f"   ⚠ {f}" for f in flags)
+    parts.append("⚠ " + " · ".join(flags) if flags else "✓")
+    return "   ".join(parts)
+
+
+class _StageProgress:
+    """
+    Append-only progress for one MD stage in quiet mode: an ETA once ~5% is
+    done, then 25 · 50 · 75. Fed the `mdrun -v` output by `_run_mdrun`; the
+    planned step count comes from the stage .log header. Never rewrites a
+    line (no \\r), so agents reading raw output get a few tokens, not a flood.
+    """
+
+    WIDTH = 42  # pad to this so the result columns line up across stages
+
+    def __init__(self, log_path):
+        self.log_path = log_path
+        self.start = time.monotonic()
+        self.nsteps = None
+        self.eta_shown = False
+        self.next_pct = 25
+        self.printed = 0
+
+    def __call__(self, text):
+        steps = re.findall(r"step (\d+)", text)
+        if not steps:
+            return
+        if self.nsteps is None:
+            rep = _stage_report(self.log_path)
+            self.nsteps = (rep and rep["nsteps"]) or 0
+        if self.nsteps <= 0:  # unknown or infinite run: no progress
+            return
+
+        frac = int(steps[-1]) / self.nsteps
+        if not self.eta_shown and 0.05 <= frac < 1:
+            elapsed = time.monotonic() - self.start
+            left = elapsed * (1 - frac) / frac
+            eta = datetime.now() + timedelta(seconds=left)
+            self._emit(f"ETA {eta:%H:%M} ({_duration(left)})")
+            self.eta_shown = True
+        while self.next_pct < 100 and frac * 100 >= self.next_pct:
+            self._emit(f"{self.next_pct}")
+            self.next_pct += 25
+
+    def _emit(self, text):
+        if self.printed:
+            text = " · " + text
+        print(text, end="", flush=True)
+        self.printed += len(text)
+
+    def pad(self):
+        """Spaces to put after the progress so the result column lines up."""
+        return " " * max(3, self.WIDTH - self.printed) if self.printed else ""
+
+
+def _duration(seconds):
+    """Rough human duration: '<1 min', '~9 min', '~1 h 20 min'."""
+    minutes = round(seconds / 60)
+    if minutes < 1:
+        return "<1 min"
+    if minutes < 60:
+        return f"~{minutes} min"
+    return f"~{minutes // 60} h {minutes % 60:02d} min"
 
 
 def _run(cmd, *, log=None, env=None, input_text=None, cwd=None):
     """
     Short helper to assist when using subprocess to run gmx.
+
+    When output goes to `log`, a failure raises with the log's tail in the
+    message, since it was never shown.
     """
-    subprocess.run(
+    try:
+        subprocess.run(
         cmd,
         input=input_text,
         # No input → give it EOF, so a tool that unexpectedly prompts fails
         # instead of waiting forever.
-        stdin=subprocess.DEVNULL if input_text is None else None,
-        text=input_text is not None,
-        stdout=log,
-        stderr=subprocess.STDOUT,  # if log is None goes to term.
-        env=env,
-        cwd=cwd,
-        check=True,
-    )
+            stdin=subprocess.DEVNULL if input_text is None else None,
+            text=input_text is not None,
+            stdout=log,
+            stderr=subprocess.STDOUT,  # if log is None goes to term.
+            env=env,
+            cwd=cwd,
+            check=True,
+        )
+    except subprocess.CalledProcessError as err:
+        if log is None:
+            raise
+        log.flush()
+        with open(log.name, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 20000))
+            tail = f.read().decode(errors="replace")
+        raise _GmxError(err.returncode, cmd, output=tail) from None
 
 
-def _run_mdrun(cmd, *, env=None, hang_timeout=600, fatal_grace=30, poll=1.0):
+class _GmxError(subprocess.CalledProcessError):
+    """
+    CalledProcessError whose message ends with the last lines of gmx output.
+    """
+
+    def __str__(self):
+        return f"{super().__str__()}\nLast output:\n{_tail_lines(self.output or '')}"
+
+
+def _run_mdrun(
+    cmd,
+    *,
+    log=None,
+    env=None,
+    hang_timeout=600,
+    fatal_grace=30,
+    poll=1.0,
+    on_output=None,
+):
     """
     Run `gmx mdrun`, blocking until it exits — but never forever.
 
     mdrun can crash without exiting (e.g. one thread-MPI rank hits a fatal
-    error and the others wait for it forever). Output is echoed to stdout as
-    it arrives, and the process is killed and a RuntimeError raised if:
+    error and the others wait for it forever). Output is written to `log`
+    (an open file) or, if None, echoed to stdout as it arrives. The process
+    is killed and a RuntimeError raised if:
 
     - it prints "Fatal error" and is still alive `fatal_grace` s later, or
     - it prints nothing for `hang_timeout` s (None disables this check).
 
     This relies on `mdrun -v`, whose progress lines arrive every few
     seconds; the stage .log is written too rarely to be useful. A non-zero
-    exit raises CalledProcessError, as `_run` does. mdrun runs in its own
+    exit raises CalledProcessError (with the output tail), as `_run` does.
+    `on_output`, if given, is called with each chunk of output (progress). mdrun runs in its own
     process group and is always killed on the way out, Ctrl-C included.
     """
     # Popen only starts mdrun; the loop below is what keeps the cell blocked.
@@ -650,6 +729,7 @@ def _run_mdrun(cmd, *, env=None, hang_timeout=600, fatal_grace=30, poll=1.0):
         start_new_session=True,
     )
     fd = proc.stdout.fileno()
+    out = log if log is not None else sys.stdout
     tail = ""  # last ~20 kB of output, for the error message
     last_output = time.monotonic()  # when mdrun last printed anything
     fatal_at = None  # when "Fatal error" first showed up
@@ -667,9 +747,11 @@ def _run_mdrun(cmd, *, env=None, hang_timeout=600, fatal_grace=30, poll=1.0):
                 chunk = os.read(fd, 65536)
                 if chunk:
                     text = chunk.decode(errors="replace")
-                    # Echo to the cell, same as the old subprocess.run.
-                    sys.stdout.write(text)
-                    sys.stdout.flush()
+                    # Echo to the cell (as the old subprocess.run did) or log.
+                    out.write(text)
+                    out.flush()
+                    if on_output is not None:
+                        on_output(text)
                     tail = (tail + text)[-20000:]
                     last_output = time.monotonic()
                     if fatal_at is None and "Fatal error" in tail:
@@ -698,7 +780,7 @@ def _run_mdrun(cmd, *, env=None, hang_timeout=600, fatal_grace=30, poll=1.0):
             _kill_group(proc)
 
     if proc.returncode != 0:
-        raise subprocess.CalledProcessError(proc.returncode, cmd, output=tail)
+        raise _GmxError(proc.returncode, cmd, output=tail)
 
 
 def _kill_group(proc, grace=10):
@@ -717,11 +799,11 @@ def _kill_group(proc, grace=10):
 
 def _tail_lines(text, n=20):
     """
-    Last `n` non-empty lines of `text`, treating `\\r` (mdrun -v progress)
-    as a line break.
+    Last `n` non-empty lines of `text`, as a terminal would show them: mdrun
+    -v rewrites its progress line with `\\r`, so only the last rewrite counts.
     """
-    lines = [line for line in re.split(r"[\r\n]+", text) if line.strip()]
-    return "\n".join(lines[-n:])
+    lines = [line.rstrip("\r").split("\r")[-1] for line in text.split("\n")]
+    return "\n".join([line for line in lines if line.strip()][-n:])
 
 
 def _traj_cleanup(gro, xtc, tpr, outname="pbc", gmx_loc=""):
