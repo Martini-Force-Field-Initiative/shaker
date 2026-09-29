@@ -4,9 +4,13 @@ import glob
 import json
 import os
 import re
+import select
 import shlex
 import shutil
+import signal
 import subprocess
+import sys
+import time
 import warnings
 from datetime import datetime
 from importlib.resources import files
@@ -268,6 +272,7 @@ def runSim(
     cleanOldRun=True,
     mapping=None,
     keep_last=-1,
+    hang_timeout=600,
 ):
     """
     Run a standard Martini simulation pipeline (minimization → relaxation → production).
@@ -281,7 +286,8 @@ def runSim(
         If None, the defaults distributed with SHAKER are used.
     minOPT, relOPT, prodOPT : str, optional
         Extra command-line arguments passed to `gmx mdrun` for each stage
-        (e.g. "-pin on -nt 8").
+        (e.g. "-pin on -nt 8"). GROMACS's own wall-time cap, `-maxh`, can
+        be passed here too.
     maxwarn : int, optional
         Value passed to `gmx grompp -maxwarn`. Default is 1.
     gmx_loc : str, optional
@@ -305,6 +311,11 @@ def runSim(
           recent iterations, pruning older ones.
 
         Use `list_iterations` to inspect saved iterations.
+    hang_timeout : float or None, optional
+        Seconds without any `mdrun` output after which the run is treated
+        as hung, killed, and a RuntimeError raised. Default is 600. None
+        disables this check. Independently, an `mdrun` that prints a fatal
+        error but does not exit is always killed after a short grace period.
 
     Notes
     -----
@@ -351,7 +362,11 @@ def runSim(
         ],
         env=env,
     )
-    _run([gmx, "mdrun", "-v", "-deffnm", "m", *shlex.split(minOPT)], env=env)
+    _run_mdrun(
+        [gmx, "mdrun", "-v", "-deffnm", "m", *shlex.split(minOPT)],
+        env=env,
+        hang_timeout=hang_timeout,
+    )
 
     ### Relax the system
     _run(
@@ -371,7 +386,11 @@ def runSim(
         ],
         env=env,
     )
-    _run([gmx, "mdrun", "-v", "-deffnm", "r", *shlex.split(relOPT)], env=env)
+    _run_mdrun(
+        [gmx, "mdrun", "-v", "-deffnm", "r", *shlex.split(relOPT)],
+        env=env,
+        hang_timeout=hang_timeout,
+    )
 
     ### Production Sim
     _run(
@@ -391,7 +410,11 @@ def runSim(
         ],
         env=env,
     )
-    _run([gmx, "mdrun", "-v", "-deffnm", "p", *shlex.split(prodOPT)], env=env)
+    _run_mdrun(
+        [gmx, "mdrun", "-v", "-deffnm", "p", *shlex.split(prodOPT)],
+        env=env,
+        hang_timeout=hang_timeout,
+    )
 
     if cleanTraj:
         _traj_cleanup("p.gro", "p.xtc", "p.tpr")
@@ -442,6 +465,9 @@ def _run(cmd, *, log=None, env=None, input_text=None, cwd=None):
     subprocess.run(
         cmd,
         input=input_text,
+        # No input → give it EOF, so a tool that unexpectedly prompts fails
+        # instead of waiting forever.
+        stdin=subprocess.DEVNULL if input_text is None else None,
         text=input_text is not None,
         stdout=log,
         stderr=subprocess.STDOUT,  # if log is None goes to term.
@@ -449,6 +475,108 @@ def _run(cmd, *, log=None, env=None, input_text=None, cwd=None):
         cwd=cwd,
         check=True,
     )
+
+
+def _run_mdrun(cmd, *, env=None, hang_timeout=600, fatal_grace=30, poll=1.0):
+    """
+    Run `gmx mdrun`, blocking until it exits — but never forever.
+
+    mdrun can crash without exiting (e.g. one thread-MPI rank hits a fatal
+    error and the others wait for it forever). Output is echoed to stdout as
+    it arrives, and the process is killed and a RuntimeError raised if:
+
+    - it prints "Fatal error" and is still alive `fatal_grace` s later, or
+    - it prints nothing for `hang_timeout` s (None disables this check).
+
+    This relies on `mdrun -v`, whose progress lines arrive every few
+    seconds; the stage .log is written too rarely to be useful. A non-zero
+    exit raises CalledProcessError, as `_run` does. mdrun runs in its own
+    process group and is always killed on the way out, Ctrl-C included.
+    """
+    # Popen only starts mdrun; the loop below is what keeps the cell blocked.
+    # Own session/process group → Ctrl-C in the notebook doesn't reach mdrun
+    # directly, and we can kill mdrun plus all its threads/children at once.
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,  # we read it ourselves (echo + watchdog)
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        env=env,
+        start_new_session=True,
+    )
+    fd = proc.stdout.fileno()
+    tail = ""  # last ~20 kB of output, for the error message
+    last_output = time.monotonic()  # when mdrun last printed anything
+    fatal_at = None  # when "Fatal error" first showed up
+    eof = False  # mdrun closed its output (normally: it exited)
+    try:
+        # Loop until mdrun has both closed its output and exited.
+        while not (eof and proc.poll() is not None):
+            if eof:
+                time.sleep(poll)
+            # Wait up to `poll` s for output. Waking up even when there is none
+            # is what lets the timeout checks below run on a silent mdrun.
+            elif select.select([fd], [], [], poll)[0]:
+                # os.read returns whatever is available (no waiting for a
+                # newline) — mdrun -v progress uses \r, not \n.
+                chunk = os.read(fd, 65536)
+                if chunk:
+                    text = chunk.decode(errors="replace")
+                    # Echo to the cell, same as the old subprocess.run.
+                    sys.stdout.write(text)
+                    sys.stdout.flush()
+                    tail = (tail + text)[-20000:]
+                    last_output = time.monotonic()
+                    if fatal_at is None and "Fatal error" in tail:
+                        fatal_at = last_output
+                else:
+                    eof = True  # empty read = pipe closed
+
+            # Watchdog: raising here jumps to `finally`, which kills mdrun.
+            now = time.monotonic()
+            if fatal_at is not None and now - fatal_at > fatal_grace:
+                reason = f"still running {fatal_grace} s after a fatal error"
+            elif hang_timeout is not None and now - last_output > hang_timeout:
+                reason = f"no output for {hang_timeout} s"
+            else:
+                continue
+            raise RuntimeError(
+                f"mdrun hung ({reason}) and was killed.\n"
+                f"Command: {shlex.join(map(str, cmd))}\n"
+                f"Last output:\n{_tail_lines(tail)}"
+            )
+    finally:
+        # Runs on normal exit, watchdog raise, Ctrl-C or any other error.
+        # If mdrun is still alive at this point, it must not outlive us.
+        proc.stdout.close()
+        if proc.poll() is None:
+            _kill_group(proc)
+
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, output=tail)
+
+
+def _kill_group(proc, grace=10):
+    """
+    SIGTERM the process group started by `_run_mdrun`, SIGKILL if it lingers.
+    """
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+    except ProcessLookupError:
+        proc.wait()
+
+
+def _tail_lines(text, n=20):
+    """
+    Last `n` non-empty lines of `text`, treating `\\r` (mdrun -v progress)
+    as a line break.
+    """
+    lines = [line for line in re.split(r"[\r\n]+", text) if line.strip()]
+    return "\n".join(lines[-n:])
 
 
 def _traj_cleanup(gro, xtc, tpr, outname="pbc", gmx_loc=""):
