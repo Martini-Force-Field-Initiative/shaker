@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from shaker import plot_bonded_distributions, plot_sasa_dir, set_options
-from shaker.plot import _distance_xlim, _finish_figure
+from shaker.plot import _distance_xlim, _finish_figure, _term_hints
 
 
 class TestFinishFigure:
@@ -112,3 +112,20 @@ def test_set_options_verbose_silences_reports_unless_asked(tmp_path, capsys):
 
     plot_sasa_dir(tmp_path, outfile=None, show=False, verbose=True)
     assert "SASA (nm²)" in capsys.readouterr().out
+
+
+def test_term_hints():
+    ang, dih = np.arange(1, 180, 2.0), np.arange(-179, 180, 2.0)
+
+    def g(x, *peaks, sd=5, periodic=False):
+        d = [((x - mu + 180) % 360 - 180) if periodic else x - mu for mu in peaks]
+        return sum(np.exp(-0.5 * (di / sd) ** 2) for di in d)
+
+    assert _term_hints("angles", ang, g(ang, 110)) == []
+    assert _term_hints("angles", ang, g(ang, 60, 90)) == ["multimodal"]
+    assert _term_hints("angles", ang, g(ang, 165)) == ["near-linear"]
+    assert _term_hints("dihedrals", dih, g(dih, 0, sd=90, periodic=True)) == ["flat"]
+    assert _term_hints("dihedrals", dih, g(dih, 178, periodic=True)) == ["planar"]
+    assert _term_hints("dihedrals", dih, g(dih, -90, 90, sd=20, periodic=True)) == [
+        "multimodal"
+    ]

@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import gridspec
 from matplotlib.backend_bases import FigureCanvasBase
+from scipy.signal import find_peaks
 from scipy.stats import wasserstein_distance
 
 from .options import _resolve
@@ -472,7 +473,9 @@ def plot_bonded_distributions(
         table, one line per term under category headings: mean ± sd of
         both, Δ mean, OC and W (the same numbers as on the plot), marked ✓
         (OC ≥ 0.80), ⚠ (≥ 0.65) or ✗, plus "mean-off" when |Δ| is larger
-        than the reference's sd; then a count line. Each further dataset
+        than the reference's sd, and hints about the reference distribution
+        (multimodal, flat, planar on terms that are not ✓; near-linear angles
+        always); then a count line. Each further dataset
         (e.g. Prev. CG) gets only its count line and the terms whose mark
         differs from the second dataset's. Units are Å for distances and
         degrees for angles and dihedrals. Printed regardless of `show`.
@@ -794,6 +797,49 @@ def _hist_stats(bins, hist, periodic=False):
     return float(mean), float(np.sqrt(np.sum(w * dev**2)))
 
 
+def _term_hints(cat, bins, hist):
+    """
+    Hints about a reference distribution for the bonded report: multimodal
+    (any term), flat / planar (dihedrals), near-linear (angles).
+    """
+    x, h = np.asarray(bins, float), np.nan_to_num(np.asarray(hist, float))
+    if h.sum() == 0:
+        return []
+    periodic = cat == "dihedrals"
+    mean, sd = _hist_stats(x, h, periodic)
+    hints = ["multimodal"] if _n_peaks(h, periodic) > 1 else []
+    if periodic and sd > 60 and not hints:  # broad single peak, not several
+        hints.append("flat")
+    elif periodic and sd < 20 and min(abs(mean), 180 - abs(mean)) < 20:
+        hints.append("planar")
+    if cat == "angles":
+        p99 = x[np.searchsorted(np.cumsum(h) / h.sum(), 0.99)]
+        if mean > 150 or p99 > 170:
+            hints.append("near-linear")
+    return hints
+
+
+def _n_peaks(hist, periodic=False, width=5, prominence=0.2):
+    """
+    Number of clear peaks in a histogram: after a `width`-bin moving average,
+    peaks standing out by at least `prominence` × the highest point. For
+    `periodic` data the ends wrap around, so a peak across ±180° counts once.
+    """
+    kernel = np.ones(width) / width
+    if periodic:
+        pad = width // 2
+        h = np.convolve(
+            np.concatenate([hist[-pad:], hist, hist[:pad]]), kernel, "valid"
+        )
+        h = np.roll(h, -np.argmin(h))  # lowest point at the ends: no split peaks
+    else:
+        h = np.convolve(hist, kernel, "same")
+    peaks, _ = find_peaks(
+        np.concatenate([[0], h, [0]]), prominence=prominence * h.max()
+    )
+    return len(peaks)
+
+
 def _bonded_summary(ref, other, categories=("distances", "angles", "dihedrals")):
     """
     Compare two `measure_bonded_terms` dicts term by term, `ref` being the
@@ -826,6 +872,7 @@ def _bonded_summary(ref, other, categories=("distances", "angles", "dihedrals"))
                     "w": float(w),
                     "status": _oc_status(oc),
                     "mean_off": abs(delta) > ref_sd,
+                    "hints": _term_hints(cat, ref_bins, ref_hist),
                 }
             )
     return summary
@@ -851,10 +898,14 @@ def _bonded_report(summaries, labels, only_flagged=False):
     ref, main = labels[0], labels[1]
     summary = list(summaries[0].values())
 
-    header = ("", f"{ref} mean ± sd", f"{main} mean ± sd", "Δ", "", "", "")
-    rows, categories = [header], [None]
+    header = ("", f"{ref} mean ± sd", f"{main} mean ± sd", "Δ", "", "", "", "")
+    rows, categories, any_hints = [header], [None], False
     for t in summary:
-        if only_flagged and t["status"] == "✓" and not t["mean_off"]:
+        # near-linear is a stability warning, so always shown; the other
+        # hints only explain terms that don't match.
+        hints = [h for h in t["hints"] if h == "near-linear" or t["status"] != "✓"]
+        any_hints |= bool(hints)
+        if only_flagged and t["status"] == "✓" and not t["mean_off"] and not hints:
             continue
         d = 2 if t["type"] == "distance" else 1  # decimals: Å vs degrees
         rows.append(
@@ -866,6 +917,7 @@ def _bonded_report(summaries, labels, only_flagged=False):
                 f"OC {t['oc']:.2f}",
                 f"W {t['w']:.{d}f}",
                 t["status"] + (" mean-off" if t["mean_off"] else ""),
+                ", ".join(hints),
             )
         )
         categories.append(t["type"])
@@ -873,7 +925,7 @@ def _bonded_report(summaries, labels, only_flagged=False):
     lines = [f"Bonded: {main} vs {ref}"]
     # Align all rows as one table, then put a heading before each category.
     for line, cat, prev in zip(
-        _table(rows, align="<>>>>><"), categories, [None, *categories]
+        _table(rows, align="<>>>>><<"), categories, [None, *categories]
     ):
         if cat is not None and cat != prev:
             lines.append(_CATEGORY_HEADINGS[cat])
@@ -896,6 +948,14 @@ def _bonded_report(summaries, labels, only_flagged=False):
         for kind, items in changes.items():
             lines.append(f"  {main} {kind + ':':7} {', '.join(items) or 'none'}")
 
+    if any_hints:
+        lines.append(
+            f"(hints, from {ref}: multimodal = several clear peaks, one harmonic "
+            "can't fit; flat = one broad dihedral peak (sd > 60°), likely needs no "
+            "potential; planar = "
+            "dihedral near 0/180° with sd < 20°, improper candidate; near-linear = "
+            "angle mean > 150° or reaching 170°, unstable in dihedrals)"
+        )
     lines.append(
         f"(OC ✓ ≥ {_OC_GOOD:.2f}, ⚠ ≥ {_OC_WARN:.2f}; mean-off: |Δ| > {ref} sd; "
         "distances Å, angles/dihedrals °)"
