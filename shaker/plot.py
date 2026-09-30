@@ -715,7 +715,11 @@ def plot_bonded_distributions(
 
 
 def _oc_status(oc):
-    """✓ / ⚠ / ✗ for an overlap coefficient."""
+    """
+    ✓ / ⚠ / ✗ for an overlap coefficient, judged on the 2-decimal value that
+    is displayed (so "0.80" is never shown with ⚠).
+    """
+    oc = round(float(oc), 2)
     return "✓" if oc >= _OC_GOOD else "⚠" if oc >= _OC_WARN else "✗"
 
 
@@ -743,6 +747,12 @@ def _distance_xlim(bins, hists, default=(1.5, 5.5), width=4.0, frac=0.01):
     return float(center - width / 2), float(center + width / 2)
 
 
+def _overlap_coefficient(bins, p, q):
+    """∫ min(p, q) dx for two densities at the same bin centres (NaN → 0)."""
+    p, q = np.nan_to_num(np.asarray(p, float)), np.nan_to_num(np.asarray(q, float))
+    return float(_trapz(np.minimum(p, q), bins))
+
+
 def _distribution_metrics(ref_bins, ref_hist, bins, hist, periodic=False):
     """
     Overlap coefficient ∫ min(p, q) dx and Wasserstein distance between two
@@ -751,7 +761,7 @@ def _distribution_metrics(ref_bins, ref_hist, bins, hist, periodic=False):
     """
     ref_hist = np.nan_to_num(np.asarray(ref_hist, float))
     hist = np.nan_to_num(np.asarray(hist, float))
-    oc = _trapz(np.minimum(ref_hist, hist), ref_bins)
+    oc = _overlap_coefficient(ref_bins, ref_hist, hist)
     if ref_hist.sum() == 0 or hist.sum() == 0:
         return oc, float("nan")
     if not periodic:
@@ -814,46 +824,84 @@ def _bonded_summary(ref, other, categories=("distances", "angles", "dihedrals"))
     return summary
 
 
+_CATEGORY_HEADINGS = {
+    "distance": "distances (Å)",
+    "angle": "angles (°)",
+    "dihedral": "dihedrals (°)",
+}
+
+
 def _bonded_report(summaries, labels, only_flagged=False):
     """
-    Text report for `plot_bonded_distributions`: one block per comparison
-    dataset vs the reference (first label), one line per term, then a count
-    line. `summaries` holds one `_bonded_summary` result per comparison, as a
-    dict in term order.
-    """
-    blocks = []
-    for summary, label in zip(summaries, labels[1:]):
-        summary = list(summary.values())
-        rows = [
-            ("", "", f"{labels[0]} mean ± sd", f"{label} mean ± sd", "Δ", "", "", "")
-        ]
-        for t in summary:
-            if only_flagged and t["status"] == "✓" and not t["mean_off"]:
-                continue
-            d = 2 if t["type"] == "distance" else 1  # decimals: Å vs degrees
-            rows.append(
-                (
-                    t["type"],
-                    t["term"],
-                    f"{t['ref_mean']:.{d}f} ± {t['ref_sd']:.{d}f}",
-                    f"{t['mean']:.{d}f} ± {t['sd']:.{d}f}",
-                    f"{t['delta']:+.{d}f}",
-                    f"OC {t['oc']:.2f}",
-                    f"W {t['w']:.{d}f}",
-                    t["status"] + (" mean-off" if t["mean_off"] else ""),
-                )
-            )
+    Text report for `plot_bonded_distributions`. `summaries` holds one
+    `_bonded_summary` result (a dict in term order) per comparison dataset.
 
-        count = {mark: sum(t["status"] == mark for t in summary) for mark in "✓⚠✗"}
-        lines = [f"Bonded: {label} vs {labels[0]}   (distances Å, angles/dihedrals °)"]
-        lines += _table(rows, align="<<>>>>><")  # text left, numbers right
-        lines.append(
-            f"{len(summary)} terms: {count['✓']} ✓  {count['⚠']} ⚠  {count['✗']} ✗, "
-            f"{sum(t['mean_off'] for t in summary)} mean-off   (OC ✓ ≥ {_OC_GOOD:.2f}, "
-            f"⚠ ≥ {_OC_WARN:.2f}; mean-off: |Δ| > {labels[0]} sd)"
+    The first comparison (the current model, e.g. CG) gets a full table:
+    one line per term under category headings, then a count line. Each
+    further comparison (e.g. Prev. CG) gets only its counts and the terms
+    whose status differs from the first comparison, to keep output short.
+    """
+    ref, main = labels[0], labels[1]
+    summary = list(summaries[0].values())
+
+    header = ("", f"{ref} mean ± sd", f"{main} mean ± sd", "Δ", "", "", "")
+    rows, categories = [header], [None]
+    for t in summary:
+        if only_flagged and t["status"] == "✓" and not t["mean_off"]:
+            continue
+        d = 2 if t["type"] == "distance" else 1  # decimals: Å vs degrees
+        rows.append(
+            (
+                f"  {t['term']}",
+                f"{t['ref_mean']:.{d}f} ± {t['ref_sd']:.{d}f}",
+                f"{t['mean']:.{d}f} ± {t['sd']:.{d}f}",
+                f"{t['delta']:+.{d}f}",
+                f"OC {t['oc']:.2f}",
+                f"W {t['w']:.{d}f}",
+                t["status"] + (" mean-off" if t["mean_off"] else ""),
+            )
         )
-        blocks.append("\n".join(lines))
-    return "\n\n".join(blocks)
+        categories.append(t["type"])
+
+    lines = [f"Bonded: {main} vs {ref}"]
+    # Align all rows as one table, then put a heading before each category.
+    for line, cat, prev in zip(
+        _table(rows, align="<>>>>><"), categories, [None, *categories]
+    ):
+        if cat is not None and cat != prev:
+            lines.append(_CATEGORY_HEADINGS[cat])
+        lines.append(line)
+    lines.append(_status_counts(summary))
+
+    # Further comparisons: counts, plus what changed relative to `main`.
+    rank = {"✓": 0, "⚠": 1, "✗": 2}
+    for other, label in zip(summaries[1:], labels[2:]):
+        lines += ["", f"{label} vs {ref}: {_status_counts(other.values())}"]
+        changes = {"worse": [], "better": []}
+        for key, t in summaries[0].items():
+            o = other[key]
+            if t["status"] != o["status"]:
+                kind = "worse" if rank[t["status"]] > rank[o["status"]] else "better"
+                changes[kind].append(
+                    f"{t['term']} {o['status']}→{t['status']} "
+                    f"(OC {o['oc']:.2f}→{t['oc']:.2f})"
+                )
+        for kind, items in changes.items():
+            lines.append(f"  {main} {kind + ':':7} {', '.join(items) or 'none'}")
+
+    lines.append(
+        f"(OC ✓ ≥ {_OC_GOOD:.2f}, ⚠ ≥ {_OC_WARN:.2f}; mean-off: |Δ| > {ref} sd; "
+        "distances Å, angles/dihedrals °)"
+    )
+    return "\n".join(lines)
+
+
+def _status_counts(summary):
+    """'5 terms: 2 ✓  1 ⚠  2 ✗, 2 mean-off' for a `_bonded_summary`."""
+    summary = list(summary)
+    n = {mark: sum(t["status"] == mark for t in summary) for mark in "✓⚠✗"}
+    off = sum(t["mean_off"] for t in summary)
+    return f"{len(summary)} terms: {n['✓']} ✓  {n['⚠']} ⚠  {n['✗']} ✗, {off} mean-off"
 
 
 def _table(rows, align):
