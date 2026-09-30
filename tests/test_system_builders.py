@@ -8,6 +8,7 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from shaker.system_builders import (
@@ -15,6 +16,7 @@ from shaker.system_builders import (
     _run_mdrun,
     _StageLine,
     list_iterations,
+    record_iteration,
     run_status,
 )
 
@@ -240,3 +242,52 @@ def test_stage_line_is_append_only(tmp_path, capsys):
     out = capsys.readouterr().out
     assert re.match(r"ETA \d\d:\d\d \(.+\) · 25 · 50 · 75 +RESULT\n$", out)
     assert out.index("RESULT") == _StageLine.WIDTH
+
+
+class TestRecordIteration:
+    def _bonded(self, mu):
+        x = np.arange(0.1, 50, 0.2)
+        h = np.exp(-0.5 * ((x - mu) / 0.1) ** 2)
+        h /= h.sum() * 0.2  # density, like measure_bonded_terms
+        empty = {"targets": [], "bins": x, "hist": np.empty((0, x.size))}
+        return {
+            "distances": {"targets": [["A", "B"]], "bins": x, "hist": h[None]},
+            "angles": empty,
+            "dihedrals": empty,
+        }
+
+    def test_writes_latest_and_prints_history(self, tmp_path, capsys):
+        (tmp_path / "iter_0_20260101_000000").mkdir()
+        latest = tmp_path / "iter_1_20260101_000100"
+        latest.mkdir()
+
+        path = record_iteration(
+            tmp_path,
+            note="bond A-B tweak",
+            overlap={"overlaps": np.array([0.8, 0.6])},
+            bonded=(self._bonded(2.2), self._bonded(2.2)),
+            sasa=[("AA", 5.0, 0.1), ("CG_Simulated", 4.8, 0.1)],
+        )
+
+        assert path == latest / "metrics.json"
+        m = json.loads(path.read_text())
+        assert m["overlap_mean_oc"] == pytest.approx(0.7)
+        assert m["bonded"]["✓"] == 1 and m["sasa_pct"] == pytest.approx(96.0)
+        rows = capsys.readouterr().out.splitlines()
+        assert rows[1].split() == ["0", "–", "–", "–", "–", "–"]
+        assert rows[2].split() == [
+            "1",
+            "96.0",
+            "✓",
+            "0.70",
+            "1",
+            "0",
+            "0",
+            "bond",
+            "A-B",
+            "tweak",
+        ]
+
+    def test_no_iterations_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="run runSim first"):
+            record_iteration(tmp_path)

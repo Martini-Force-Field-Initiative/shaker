@@ -21,6 +21,7 @@ import MDAnalysis as md
 import numpy as np
 
 from .options import _resolve
+from .plot import _SASA_OK, _SASA_WARN, _bonded_summary, _table
 
 _ITER_RE = re.compile(r"^iter_(\d+)_\d{8}_\d{6}$")
 # runSim stage prefixes (-deffnm) and their display names.
@@ -493,6 +494,142 @@ def list_iterations(run_dir):
 
     found.sort(key=lambda pair: pair[0])
     return [path for _, path in found]
+
+
+def record_iteration(
+    run_dir,
+    note="",
+    overlap=None,
+    bonded=None,
+    sasa=None,
+    sasa_name="CG_Simulated",
+    reference="AA",
+    iteration=None,
+    verbose=None,
+):
+    """
+    Record how an iteration scored, and print the history of all iterations.
+
+    Call it after analysing the latest `runSim`, with the results the
+    notebook already holds; nothing is re-measured. The numbers are written
+    to `metrics.json` in that iteration's `iter_*` folder (overwritten if
+    recorded again), so they are pruned together with it by `keep_last`.
+
+    Parameters
+    ----------
+    run_dir : str or Path
+        Directory `runSim` was executed in (e.g. the tutorials' `CG_WAT`).
+    note : str, optional
+        What changed in this iteration, e.g. "WR5-WR7 r0 0.472 -> 0.480".
+    overlap : dict, optional
+        The overlap results returned by `assess_overlap_matrix`; their mean
+        OC over all bead pairs is recorded.
+    bonded : tuple of dict, optional
+        `(reference, cg)` dicts from `measure_bonded_terms`, measured with
+        the same targets and bins; the counts of terms marked ✓ / ⚠ / ✗ (as
+        in `plot_bonded_distributions`' report) are recorded.
+    sasa : list of tuple, optional
+        The `items` returned by `plot_sasa_dir`; the SASA of `sasa_name` is
+        recorded as a percentage of `reference`'s.
+    sasa_name : str, optional
+        SASA entry for this iteration's CG simulation. Default
+        "CG_Simulated", as in the tutorial.
+    reference : str, optional
+        SASA entry to compare against. Default "AA".
+    iteration : int, optional
+        Index of the iteration to record (the N in `iter_N_*`). Default: the
+        latest one, i.e. the run `runSim` just checkpointed.
+    verbose : bool or None, optional
+        Whether to print the history table: one row per iteration with SASA
+        %, mean overlap OC, bonded ✓ / ⚠ / ✗ counts and the note ("–" where
+        nothing was recorded). None (default) uses the SHAKER-wide setting
+        (see `set_options`), which is True unless changed.
+
+    Returns
+    -------
+    Path
+        The `metrics.json` file written.
+    """
+    run_dir = Path(run_dir)
+    iterations = list_iterations(run_dir)
+    if not iterations:
+        raise ValueError(
+            f"No iter_* folders in {run_dir}: run runSim first (with keep_last "
+            "not None) so there is an iteration to record."
+        )
+    if iteration is None:
+        target = iterations[-1]
+    else:
+        matches = [p for p in iterations if _iteration_index(p) == int(iteration)]
+        if not matches:
+            raise ValueError(f"No iteration {iteration} in {run_dir}.")
+        target = matches[0]
+
+    metrics = {"note": note, "recorded": time.strftime("%Y-%m-%d %H:%M:%S")}
+    if overlap is not None:
+        metrics["overlap_mean_oc"] = float(np.nanmean(overlap["overlaps"]))
+    if bonded is not None:
+        ref, cg = bonded
+        for cat in ("distances", "angles", "dihedrals"):
+            if ref[cat]["targets"] and not np.array_equal(
+                ref[cat]["bins"], cg[cat]["bins"]
+            ):
+                raise ValueError(f"'{cat}' bins differ between the two bonded dicts.")
+        summary = _bonded_summary(ref, cg)
+        metrics["bonded"] = {m: sum(t["status"] == m for t in summary) for m in "✓⚠✗"}
+        metrics["bonded"]["mean_off"] = sum(t["mean_off"] for t in summary)
+    if sasa is not None:
+        means = {name: mean for name, mean, _ in sasa}
+        if sasa_name in means and reference in means:
+            metrics["sasa_pct"] = 100 * means[sasa_name] / means[reference]
+            metrics["sasa_reference"] = reference
+        else:
+            warnings.warn(
+                f"SASA entries '{sasa_name}' and '{reference}' not both found; "
+                "SASA not recorded."
+            )
+
+    path = target / "metrics.json"
+    path.write_text(json.dumps(metrics, indent=2, ensure_ascii=False))
+
+    if _resolve(verbose, "verbose"):
+        print(_iteration_table(run_dir))
+    return path
+
+
+def _iteration_index(iter_dir):
+    """N from an `iter_N_<timestamp>` folder."""
+    return int(_ITER_RE.match(Path(iter_dir).name).group(1))
+
+
+def _iteration_table(run_dir):
+    """History table for `record_iteration`, one row per iteration."""
+    rows = [("iter", "SASA %", "overlap", "bonded ✓", "⚠", "✗", "note")]
+    for iter_dir in list_iterations(run_dir):
+        path = iter_dir / "metrics.json"
+        m = json.loads(path.read_text()) if path.is_file() else {}
+        sasa, oc, bonded = m.get("sasa_pct"), m.get("overlap_mean_oc"), m.get("bonded")
+        if sasa is None:
+            sasa_cell = "–"
+        else:
+            dev = abs(sasa - 100) / 100
+            mark = "✓" if dev <= _SASA_OK else "⚠" if dev <= _SASA_WARN else "✗"
+            sasa_cell = f"{sasa:.1f} {mark}"
+        rows.append(
+            (
+                str(_iteration_index(iter_dir)),
+                sasa_cell,
+                "–" if oc is None else f"{oc:.2f}",
+                *(("–",) * 3 if bonded is None else (str(bonded[k]) for k in "✓⚠✗")),
+                m.get("note", ""),
+            )
+        )
+    lines = _table(rows, align=">>>>>><")
+    lines.append(
+        "(SASA as % of the reference, ✓ within 5 %, ⚠ within 10 %; overlap = mean OC of all "
+        "bead pairs; bonded = terms per mark, as in plot_bonded_distributions)"
+    )
+    return "\n".join(lines)
 
 
 def run_status(run_dir=".", verbose=None):
@@ -1001,7 +1138,7 @@ def _checkpoint(mapping=None, itp_glob="*.itp", keep_last=-1):
         return None
 
     existing = list_iterations(cwd)
-    next_idx = (int(_ITER_RE.match(existing[-1].name).group(1)) + 1) if existing else 0
+    next_idx = _iteration_index(existing[-1]) + 1 if existing else 0
 
     stamp = time.strftime("%Y%m%d_%H%M%S")  # local time
     iter_dir = cwd / f"iter_{next_idx}_{stamp}"

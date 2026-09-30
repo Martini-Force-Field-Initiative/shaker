@@ -32,6 +32,7 @@ __all__ = [
     "plot_bonded_distributions",
     "plot_sasa_dir",
     "prepare_setup_water",
+    "record_iteration",
     "render",
     "render_2d",
     "render_2dMapping",
@@ -77,6 +78,7 @@ from .sasa import run_SASA
 from .system_builders import (
     list_iterations,
     prepare_setup_water,
+    record_iteration,
     run_status,
     runSim,
 )
