@@ -3,9 +3,9 @@
 import warnings
 
 import numpy as np
-from tqdm.autonotebook import tqdm
 
 from .helper import _BINS_ANGL, _BINS_DIHED, _BINS_DIST, _density_histograms
+from .options import _progress
 
 warnings.filterwarnings(
     "ignore",
@@ -116,7 +116,7 @@ def measure_bonded_terms(
     # print('Calculating distributions...')
     resids = np.unique(u.select_atoms(f"resname {resname}").resids)
 
-    for resid in tqdm(resids, desc="Measuring Bonded parameters"):
+    for resid in _progress(resids, desc="Measuring Bonded parameters"):
         dists = [
             _beadstodistance(u, resid, resname, a, resid, resname, b)
             for (a, b) in dist_tgts

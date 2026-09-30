@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import gridspec, ticker
 from MDAnalysis.analysis.distances import self_distance_array
-from tqdm.autonotebook import tqdm
 
 from .helper import _BINS_DIST, _density_histograms
+from .options import _progress, _resolve
 from .plot import (
     _OC_GOOD,
     _OC_WARN,
@@ -86,7 +86,7 @@ def _measure_intra_bead_distances(
         for bead in bead_names
     }
 
-    for ts in tqdm(
+    for ts in _progress(
         u.trajectory[start:stop:stride], desc="Measuring intra-bead distances"
     ):
         for resid in resids:
@@ -259,7 +259,7 @@ def assess_overlap_matrix(
     outfile="overlap_matrix",
     transparent=True,
     show=None,
-    verbose=True,
+    verbose=None,
     print_matrix=False,
 ):
     """
@@ -317,11 +317,12 @@ def assess_overlap_matrix(
         Whether to display the figure in the notebook. None (default) uses
         the SHAKER-wide setting (see `set_options`), which is True unless
         changed. The figure is saved either way.
-    verbose : bool, optional
-        If True (default), print a short summary: mean OC over all pairs,
+    verbose : bool or None, optional
+        Whether to print a short summary: mean OC over all pairs,
         pair counts per ✓ (OC ≥ 0.80) / ⚠ (≥ 0.65) / ✗, each bead's mean OC
         (worst first) and up to 5 worst pairs that are not ✓. Printed
-        regardless of `show`.
+        regardless of `show`. None (default) uses the SHAKER-wide setting
+        (see `set_options`), which is True unless changed.
     print_matrix : bool, optional
         With `verbose`, also print the full N×N matrix (with a per-bead mean
         column) above the summary. Its size grows with N², so it is off by
@@ -387,7 +388,7 @@ def assess_overlap_matrix(
         oc, vmin=vmin, vmax=vmax, title=title, cell_fontsize=cell_fontsize
     )
     _finish_figure(fig, outfile, transparent, show)
-    if verbose:
+    if _resolve(verbose, "verbose"):
         print(_overlap_report(oc, print_matrix))
     return oc, fig, axes
 

@@ -1,4 +1,4 @@
-"""Tests for figure saving/display control (shaker/plot.py, shaker/_options.py)."""
+"""Tests for figure saving/display control (shaker/plot.py, shaker/options.py)."""
 
 import re
 
@@ -11,15 +11,7 @@ import numpy as np
 import pytest
 
 from shaker import plot_bonded_distributions, plot_sasa_dir, set_options
-from shaker._options import _OPTIONS
 from shaker.plot import _distance_xlim, _finish_figure
-
-
-@pytest.fixture(autouse=True)
-def _restore_options():
-    saved = dict(_OPTIONS)
-    yield
-    _OPTIONS.update(saved)
 
 
 class TestFinishFigure:
@@ -108,3 +100,15 @@ def test_distance_xlim_keeps_4A_window_around_peaks():
     assert _distance_xlim(x, [g(2.2, 0.1), g(2.3, 0.1)]) == (1.5, 5.5)
     lo, hi = _distance_xlim(x, [g(13.9, 1.0), g(12.7, 1.8)])
     assert hi - lo == pytest.approx(4.0) and lo < 12.7 and hi > 13.9
+
+
+def test_set_options_verbose_silences_reports_unless_asked(tmp_path, capsys):
+    (tmp_path / "AA").mkdir()
+    (tmp_path / "AA" / "SASA.xvg").write_text("0 5.0\n1 5.1\n")
+
+    set_options(verbose=False)
+    plot_sasa_dir(tmp_path, outfile=None, show=False)
+    assert capsys.readouterr().out == ""
+
+    plot_sasa_dir(tmp_path, outfile=None, show=False, verbose=True)
+    assert "SASA (nm²)" in capsys.readouterr().out

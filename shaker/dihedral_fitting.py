@@ -7,7 +7,7 @@ from math import factorial
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ._options import _resolve
+from .options import _resolve
 from .plot import _finish_figure
 
 

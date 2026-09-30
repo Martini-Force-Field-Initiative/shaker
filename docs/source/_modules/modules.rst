@@ -15,6 +15,7 @@ For a description of the module's functions click on the module's name.
    itp
    mapper
    measurer
+   options
    overlap
    plot
    render
