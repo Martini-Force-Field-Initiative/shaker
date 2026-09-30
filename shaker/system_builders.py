@@ -740,7 +740,11 @@ class _GmxError(subprocess.CalledProcessError):
     """
 
     def __str__(self):
-        return f"{super().__str__()}\nLast output:\n{_tail_lines(self.output or '')}"
+        return (
+            f"{shlex.join(map(str, self.cmd))}\n"
+            f"failed with exit status {self.returncode}. Last output:\n"
+            f"{_tail_lines(self.output or '')}"
+        )
 
 
 def _run_mdrun(

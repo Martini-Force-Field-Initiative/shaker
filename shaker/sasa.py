@@ -2,7 +2,6 @@
 
 import os
 import shutil
-import subprocess
 import warnings
 from importlib.resources import files
 from pathlib import Path
@@ -10,6 +9,7 @@ from pathlib import Path
 import MDAnalysis as md
 
 from .helper import _bead_sizes_dict, _size_from_name, _validate_bead_types
+from .system_builders import _run
 
 
 def run_SASA(
@@ -143,29 +143,10 @@ def run_SASA(
         "surface.pdb",
     ]
 
-    logfile = f"{dir_writing}/gmx_sasa.log"
-    with open(logfile, "w") as log:
-        subprocess.run(
-            cmd1,
-            input="TGT\n",
-            cwd=dir_writing,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            env=env,
-            text=True,
-            check=True,
-        )
-
-        subprocess.run(
-            cmd2,
-            input="System\n",
-            cwd=dir_writing,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            env=env,
-            text=True,
-            check=True,
-        )
+    # Output goes to gmx_sasa.log; a failure raises with the log's last lines.
+    with open(f"{dir_writing}/gmx_sasa.log", "w") as log:
+        _run(cmd1, log=log, env=env, input_text="TGT\n", cwd=dir_writing)
+        _run(cmd2, log=log, env=env, input_text="System\n", cwd=dir_writing)
 
 
 def _write_cg_vdw(dir_out, bead_names, bead_sizes):
