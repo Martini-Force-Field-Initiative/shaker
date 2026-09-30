@@ -26,6 +26,7 @@ __all__ = [
     "mapper",
     "measure_bonded_terms",
     "measurer",
+    "options",
     "overlap",
     "plot",
     "plot_bonded_distributions",
@@ -54,6 +55,7 @@ from . import (
     itp,
     mapper,
     measurer,
+    options,
     overlap,
     plot,
     render,
@@ -62,11 +64,11 @@ from . import (
     system_builders,
     vsites,
 )
-from ._options import set_options
 from .estimator import bonded_estimator
 from .itp import write_initial_CGitp
 from .mapper import map_aa2cg
 from .measurer import measure_bonded_terms
+from .options import set_options
 from .overlap import assess_overlap_matrix
 from .plot import plot_bonded_distributions, plot_sasa_dir
 from .render import render_connely_surface, render_ensemble, render_mapping

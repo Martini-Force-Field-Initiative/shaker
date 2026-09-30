@@ -20,6 +20,8 @@ from pathlib import Path
 import MDAnalysis as md
 import numpy as np
 
+from .options import _resolve
+
 _ITER_RE = re.compile(r"^iter_(\d+)_\d{8}_\d{6}$")
 # runSim stage prefixes (-deffnm) and their display names.
 _STAGES = {"m": "min", "r": "rel", "p": "prod"}
@@ -285,7 +287,8 @@ def runSim(
     mapping=None,
     keep_last=-1,
     hang_timeout=600,
-    verbose=False,
+    stream_gmx=False,
+    verbose=None,
 ):
     """
     Run a standard Martini simulation pipeline (minimization → relaxation → production).
@@ -332,11 +335,15 @@ def runSim(
         as hung, killed, and a RuntimeError raised. Default is 600. None
         disables this check. Independently, an `mdrun` that prints a fatal
         error but does not exit is always killed after a short grace period.
-    verbose : bool, optional
-        If False (default), GROMACS output goes to `gmx_run.log` and only one
-        line per stage is printed: progress (ETA, 25 · 50 · 75) while it runs,
-        then its result. A failing command raises with the last lines of
-        output. If True, stream the full GROMACS output instead.
+    stream_gmx : bool, optional
+        If False (default), GROMACS output goes to `gmx_run.log`; a failing
+        command raises with its last lines of output. If True, stream the
+        full GROMACS output into the cell/terminal instead.
+    verbose : bool or None, optional
+        Whether to print one line per stage (see Notes): progress while it
+        runs (only when not streaming GROMACS output), then its result.
+        None (default) uses the SHAKER-wide setting (see `set_options`),
+        which is True unless changed.
 
     Notes
     -----
@@ -350,7 +357,8 @@ def runSim(
     Output files use the prefixes `m`, `r`, and `p` corresponding to
     minimization, relaxation, and production stages.
 
-    With `verbose=False`, the printed output is one line per stage, e.g.::
+    By default (`verbose` on, `stream_gmx=False`), the printed output is one
+    line per stage, e.g.::
 
         runSim · output → gmx_run.log
           min    3491 steps   Fmax 24.8 (target 10)   ✓
@@ -393,17 +401,20 @@ def runSim(
         ("r", relMDP, "m.gro", relOPT),  # relax
         ("p", prodMDP, "r.gro", prodOPT),  # production
     )
-    if not verbose:
+    verbose = _resolve(verbose, "verbose")
+    if verbose and not stream_gmx:
         print("runSim · output → gmx_run.log")
     with contextlib.ExitStack() as stack:
-        # Quiet: all gmx output goes to gmx_run.log; errors still show its tail.
-        log = None if verbose else stack.enter_context(open("gmx_run.log", "w"))
+        # Not streaming: all gmx output goes to gmx_run.log; errors still
+        # show its tail.
+        log = None if stream_gmx else stack.enter_context(open("gmx_run.log", "w"))
         for prefix, mdp, coords, opt in stages:
             label = f"  {_STAGES[prefix]:<6} "
-            # Quiet: the stage's line starts now and grows while it runs.
-            # Minimization gets no % (it usually stops well before nsteps).
+            # The stage's line starts now and grows while it runs (unless gmx
+            # output is streamed, which shows progress itself). Minimization
+            # gets no % (it usually stops well before nsteps).
             line = None
-            if not verbose:
+            if verbose and not stream_gmx:
                 line = _StageLine(label, None if prefix == "m" else f"{prefix}.log")
             try:
                 _run(
@@ -439,7 +450,7 @@ def runSim(
             result = _stage_result(_stage_report(f"{prefix}.log"))
             if line is not None:
                 line.finish(result)
-            else:  # verbose: after mdrun's own output
+            elif verbose:  # streaming: after mdrun's own output
                 print(label + result)
 
     if cleanTraj:
@@ -484,7 +495,7 @@ def list_iterations(run_dir):
     return [path for _, path in found]
 
 
-def run_status(run_dir=".", verbose=True):
+def run_status(run_dir=".", verbose=None):
     """
     Report on the last `runSim` in `run_dir`, read from its m/r/p .log files.
 
@@ -496,8 +507,10 @@ def run_status(run_dir=".", verbose=True):
     ----------
     run_dir : str or Path, optional
         Directory `runSim` was executed in. Default is ".".
-    verbose : bool, optional
-        If True (default), print one line per stage plus a summary line.
+    verbose : bool or None, optional
+        Whether to print one line per stage plus a summary line. None
+        (default) uses the SHAKER-wide setting (see `set_options`), which is
+        True unless changed.
 
     Returns
     -------
@@ -519,7 +532,7 @@ def run_status(run_dir=".", verbose=True):
     )
     status["iterations"] = [p.name for p in list_iterations(run_dir)]
 
-    if verbose:
+    if _resolve(verbose, "verbose"):
         for name in _STAGES.values():
             print(f"  {name:<6} {_stage_result(status[name])}")
         crash = ", ".join(status["crash_files"]) or "none"
@@ -623,7 +636,8 @@ def _stage_result(rep):
 
 class _StageLine:
     """
-    One stage's line in quiet mode, append-only (never rewritten with \\r, so
+    One stage's line of runSim's output (when GROMACS output is not
+    streamed), append-only (never rewritten with \\r, so
     agents reading raw output get a few tokens, not a flood).
 
     Created → prints the stage label. Called with `mdrun -v` output (by

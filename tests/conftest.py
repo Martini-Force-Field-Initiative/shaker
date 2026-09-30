@@ -9,6 +9,16 @@ def _run_in_tmp_path(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
 
+@pytest.fixture(autouse=True)
+def _restore_options():
+    """Undo any shaker.set_options() a test makes."""
+    from shaker.options import _OPTIONS
+
+    saved = dict(_OPTIONS)
+    yield
+    _OPTIONS.update(saved)
+
+
 def make_universe(positions, names, resname="MOL", resid=1):
     """Build a single-residue in-memory universe at fixed positions (in Å)."""
     n = len(positions)

@@ -5,9 +5,9 @@ from pathlib import Path
 
 import MDAnalysis as md
 import numpy as np
-from tqdm.autonotebook import tqdm
 
 from .helper import _BEAD_RATIOS, _size_from_name, _size_label
+from .options import _progress, _resolve
 
 
 def _write_mapping_report(u, mapping, outdir, outname, verbose=True):
@@ -37,8 +37,8 @@ def _write_mapping_report(u, mapping, outdir, outname, verbose=True):
     outname : str
         Base name used for the log file ({outname}_mapping.log).
     verbose : bool, optional
-        If ``True`` (default), print the report to the terminal in addition
-        to writing it to the log file.
+        If ``True`` (default), print where the log was written and the report
+        itself, in addition to writing it to the log file.
     """
     log_path = outdir / f"{outname}_mapping.log"
 
@@ -119,14 +119,13 @@ def _write_mapping_report(u, mapping, outdir, outname, verbose=True):
     with open(log_path, "w") as f:
         f.write(report_str)
 
-    print(f"Mapping log written to {log_path}\n")
-
     if verbose:
+        print(f"Mapping log written to {log_path}\n")
         print(report_str)
 
 
 def map_aa2cg(
-    gro, xtc, mapping, outname="cg_mapped", outdir=".", report=True, verbose=True
+    gro, xtc, mapping, outname="cg_mapped", outdir=".", report=True, verbose=None
 ):
     """
     Map an atomistic trajectory to a coarse-grained representation.
@@ -181,10 +180,11 @@ def map_aa2cg(
         atoms). When bead ``type`` fields are present the mismatch is
         type-weighted (regular=4, small=3, tiny=2, virtual=0); otherwise an
         unweighted 4:1 ratio is assumed.
-    verbose : bool, optional
-        If ``True`` (default), print the mapping report to the terminal in
-        addition to writing it to the log file. Has no effect if ``report``
-        is ``False``.
+    verbose : bool or None, optional
+        Whether to print the mapping report (and where its log was written)
+        in addition to writing it to the log file. None (default) uses the
+        SHAKER-wide setting (see `set_options`), which is True unless
+        changed. Has no effect if ``report`` is ``False``.
 
     Returns
     -------
@@ -266,7 +266,7 @@ def map_aa2cg(
 
     wrote_gro = False
     with md.Writer(out_xtc.as_posix(), n_beads) as W:
-        for ts in tqdm(u.trajectory, desc="Mapping the trajectory"):
+        for ts in _progress(u.trajectory, desc="Mapping the trajectory"):
             for k, ag in enumerate(bead_agg):
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", message=".*duplicates.*")
@@ -284,4 +284,6 @@ def map_aa2cg(
                 wrote_gro = True
 
     if report:
-        _write_mapping_report(u, mapping, outdir, outname, verbose=verbose)
+        _write_mapping_report(
+            u, mapping, outdir, outname, verbose=_resolve(verbose, "verbose")
+        )

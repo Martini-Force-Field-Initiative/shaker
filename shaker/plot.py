@@ -11,7 +11,7 @@ from matplotlib import gridspec
 from matplotlib.backend_bases import FigureCanvasBase
 from scipy.stats import wasserstein_distance
 
-from ._options import _resolve
+from .options import _resolve
 
 mpl.rcParams["figure.dpi"] = 150
 
@@ -64,7 +64,7 @@ def plot_sasa_dir(
     outfile="SASABar",
     transparent=True,
     show=None,
-    verbose=True,
+    verbose=None,
 ):
     """
     Plot SASA values from multiple simulations stored in subdirectories.
@@ -110,11 +110,13 @@ def plot_sasa_dir(
         Whether to display the figure in the notebook. None (default) uses
         the SHAKER-wide setting (see `set_options`), which is True unless
         changed. The figure is saved either way.
-    verbose : bool, optional
-        If True (default), print a short report: mean ± std per
-        subdirectory and, if "AA" is present, the difference from AA in nm²
-        and %, marked ✓ (within 5 %), ⚠ (5–10 %) or ✗ (>10 %), the same
-        thresholds as the plot's bands. Printed regardless of `show`.
+    verbose : bool or None, optional
+        Whether to print a short report: mean ± std per subdirectory and, if
+        "AA" is present, the difference from AA in nm² and %, marked ✓
+        (within 5 %), ⚠ (5–10 %) or ✗ (>10 %), the same thresholds as the
+        plot's bands. Printed regardless of `show`. None (default) uses the
+        SHAKER-wide setting (see `set_options`), which is True unless
+        changed.
 
     Returns
     -------
@@ -136,7 +138,7 @@ def plot_sasa_dir(
     else:
         fig, ax = _plot_sasa_violin(entries)
     _finish_figure(fig, outfile, transparent, show)
-    if verbose:
+    if _resolve(verbose, "verbose"):
         print(_sasa_report(items))
     return fig, ax, items
 
@@ -416,7 +418,7 @@ def plot_bonded_distributions(
     show_peaks=False,
     metrics=True,
     show=None,
-    verbose=True,
+    verbose=None,
     only_flagged=False,
 ):
     """
@@ -434,15 +436,15 @@ def plot_bonded_distributions(
                 "dihedrals": {"targets": ..., "bins": ..., "hist": ...},
             }
 
-    labels : list[str] | None, optional
+    labels : list of str or None, optional
         Labels for each bonded dictionary. If None, uses Dataset 1, Dataset 2, ...
 
-    colors : list[str] | None, optional
+    colors : list of str or None, optional
         Line colors for each bonded dictionary. If None (or for None entries),
         the default palette is used: tab:blue, tab:red, tab:grey, then the
         other tab: colours.
 
-    outfile : str | Path | None, optional
+    outfile : str or Path or None, optional
         Where to save the figure: as SVG (`<outfile>.svg`) unless it ends in
         another image extension, e.g. "bonds.png". Overwritten if it exists;
         None saves nothing. Default "cleanbonds".
@@ -459,23 +461,28 @@ def plot_bonded_distributions(
         the overlapping region between curves. Default is True. For
         dihedrals, W is measured on the circle (-179° and 179° are 2° apart).
 
-    show : bool | None, optional
+    show : bool or None, optional
         Whether to display the figure in the notebook. None (default) uses
         the SHAKER-wide setting (see `set_options`), which is True unless
         changed. The figure is saved either way.
 
-    verbose : bool, optional
-        If True (default) and there are at least two datasets, print a text
-        report comparing each dataset with the reference (first) one: per
-        term, mean ± sd of both, Δ mean, OC and W (the same numbers as on the
-        plot), marked ✓ (OC ≥ 0.80), ⚠ (≥ 0.65) or ✗, plus "mean-off" when
-        |Δ| is larger than the reference's sd; then a one-line count. Units
-        are Å for distances and degrees for angles and dihedrals. Printed
-        regardless of `show`.
+    verbose : bool or None, optional
+        Whether to print (with at least two datasets) a text report against
+        the reference (first) dataset. The second dataset (e.g. CG) gets a
+        table, one line per term under category headings: mean ± sd of
+        both, Δ mean, OC and W (the same numbers as on the plot), marked ✓
+        (OC ≥ 0.80), ⚠ (≥ 0.65) or ✗, plus "mean-off" when |Δ| is larger
+        than the reference's sd; then a count line. Each further dataset
+        (e.g. Prev. CG) gets only its count line and the terms whose mark
+        differs from the second dataset's. Units are Å for distances and
+        degrees for angles and dihedrals. Printed regardless of `show`.
+        None (default) uses the SHAKER-wide setting (see `set_options`),
+        which is True unless changed.
 
     only_flagged : bool, optional
-        With `verbose`, list only the terms that are not ✓ or are mean-off
-        (the count line is always printed). Default False.
+        With `verbose`, list only the terms that are not ✓ or are mean-off in
+        the table (count lines and further datasets are always printed).
+        Default False.
 
     Returns
     -------
@@ -709,7 +716,7 @@ def plot_bonded_distributions(
             ax.set_ylabel("Prob. density")
 
     _finish_figure(fig, outfile, transparent, show)
-    if verbose and summaries:
+    if _resolve(verbose, "verbose") and summaries:
         print(_bonded_report(summaries, labels, only_flagged))
     return fig
 
