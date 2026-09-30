@@ -187,3 +187,19 @@ class TestResultStructure:
         res = measure_bonded_terms(u, "MOL", [], [], [])
         assert res["distances"]["hist"].shape[0] == 0
         assert res["angles"]["hist"].shape[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# Default bin coverage
+# ---------------------------------------------------------------------------
+
+
+def test_linear_angle_is_binned_and_far_pair_warns():
+    # A-B-C exactly linear (180°), A-C 60 Å apart (beyond the 0–50 Å bins).
+    u = make_universe([[0, 0, 0], [30, 0, 0], [60, 0, 0]], ["A", "B", "C"])
+
+    with pytest.warns(UserWarning, match=r"A-C: 100\.0% of values fall outside"):
+        res = measure_bonded_terms(u, "MOL", [["A", "C"]], [["A", "B", "C"]], [])
+
+    assert res["angles"]["hist"][0].sum() > 0  # 180° counted, not dropped
+    assert peak_bin(res, "angles") == pytest.approx(179.0)

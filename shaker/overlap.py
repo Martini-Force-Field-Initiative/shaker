@@ -7,6 +7,7 @@ from matplotlib import gridspec, ticker
 from MDAnalysis.analysis.distances import self_distance_array
 from tqdm.autonotebook import tqdm
 
+from .helper import _BINS_DIST, _density_histograms
 from .plot import _finish_figure
 
 
@@ -48,7 +49,7 @@ def _measure_intra_bead_distances(
     Returns dict with keys: bins, hist (n_pairs × n_bins), pairs, bead_names.
     """
     if bins_dist is None:
-        bins_dist = np.arange(0, 15, 0.2)
+        bins_dist = _BINS_DIST
 
     if save_npy and not outname:
         raise ValueError("outname must be provided when save_npy=True")
@@ -89,9 +90,8 @@ def _measure_intra_bead_distances(
             for k, d in enumerate(dists):
                 raw_out[k].append(d)
 
-    hists = np.array(
-        [np.histogram(v, bins=bins_dist, density=True)[0] for v in raw_out]
-    )
+    names = [f"{a}-{b}" for a, b in pairs]
+    hists = _density_histograms(raw_out, bins_dist, names, "bins_dist")
 
     results = {"bins": bins_x, "hist": hists, "pairs": pairs, "bead_names": bead_names}
 
@@ -286,7 +286,8 @@ def assess_overlap_matrix(
     stride : int, optional
         Frame stride (default: 1).
     bins_dist : array-like or None, optional
-        Bin edges for distance histograms (default: 0–15 Å in 0.2 Å steps).
+        Bin edges for distance histograms (default: 0–50 Å in 0.2 Å steps).
+        A warning names any bead pair with distances outside them.
     vmin : float, optional
         Lower bound for colormap normalisation (default: 0).
     vmax : float, optional
@@ -340,7 +341,7 @@ def assess_overlap_matrix(
     """
 
     if bins_dist is None:
-        bins_dist = np.arange(0, 15, 0.2)
+        bins_dist = _BINS_DIST
 
     results_aa = _measure_intra_bead_distances(
         u_aa,
