@@ -287,3 +287,141 @@ def map_aa2cg(
         _write_mapping_report(
             u, mapping, outdir, outname, verbose=_resolve(verbose, "verbose")
         )
+
+
+def bead_neighbours(structure, mapping, resname, verbose=None):
+    """
+    Find which CG beads are bonded to each other, from the AA bonds.
+
+    Two beads are neighbours if an atom of one is bonded to an atom of the
+    other, directly or through atoms that belong to no bead, or if they
+    share an atom. AA bonds are guessed by MDAnalysis from interatomic
+    distances, on the first residue named `resname` in `structure`.
+
+    The printed summary also lists bead rings: cycles of bonded beads (up
+    to 8 beads) with no shortcut through them. These usually, but not
+    always, follow chemical rings, e.g. three beads bonded to the same
+    unmapped atom form a bead ring. For Martini the bead ring is what
+    matters: a 3-bead ring is a triangle of bonds or constraints.
+
+    Parameters
+    ----------
+    structure : str or Path
+        AA structure file (e.g. .gro or .pdb). No trajectory is needed.
+    mapping : dict
+        Mapping dictionary in SHAKER format.
+    resname : str
+        Residue name of the mapped molecule.
+    verbose : bool or None, optional
+        Whether to print each bead's neighbours, the number of bonded pairs
+        and the bead rings. None (default) uses the SHAKER-wide setting (see
+        `set_options`), which is True unless changed.
+
+    Returns
+    -------
+    dict
+        ``{bead: [neighbouring beads]}``, in mapping order.
+
+    Raises
+    ------
+    ValueError
+        If `resname` is not in `structure` or `mapping`, or if bonds cannot
+        be guessed (e.g. atom types cannot be inferred from atom names).
+    """
+    if resname not in mapping:
+        raise ValueError(f"No mapping found for resname '{resname}'")
+    beads = mapping[resname]
+    order = list(beads)
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r"Element information is missing")
+        u = md.Universe(str(structure))
+    residues = u.select_atoms(f"resname {resname}").residues
+    if len(residues) == 0:
+        raise ValueError(f"No residue named '{resname}' in {structure}")
+    atoms = residues[0].atoms
+    try:
+        atoms.guess_bonds()
+    except (ValueError, KeyError) as err:
+        raise ValueError(
+            f"Could not guess AA bonds for '{resname}' in {structure}: {err}"
+        ) from err
+
+    # Beads each atom belongs to (by atom name), and atom-atom bonds.
+    names = list(atoms.names)
+    atom_beads = [set() for _ in names]
+    for bead, info in beads.items():
+        for name in info["atoms"]:
+            if name in names:
+                atom_beads[names.index(name)].add(bead)
+    local = {a.index: k for k, a in enumerate(atoms)}
+    bonded = [set() for _ in names]
+    for a, b in atoms.bonds.indices:
+        if a in local and b in local:
+            bonded[local[a]].add(local[b])
+            bonded[local[b]].add(local[a])
+
+    # From every mapped atom, walk through unmapped atoms only; each mapped
+    # atom reached links the two atoms' beads.
+    adj = {bead: set() for bead in order}
+    for start, own in enumerate(atom_beads):
+        for bead in own:  # beads sharing an atom
+            adj[bead] |= own - {bead}
+        stack, seen = [start] if own else [], {start}
+        while stack:
+            for n in bonded[stack.pop()] - seen:
+                seen.add(n)
+                if atom_beads[n]:
+                    for bead in own:
+                        adj[bead] |= atom_beads[n] - {bead}
+                else:
+                    stack.append(n)
+    neighbours = {b: sorted(adj[b], key=order.index) for b in order}
+
+    if _resolve(verbose, "verbose"):
+        print(_neighbours_report(neighbours, beads, resname))
+    return neighbours
+
+
+def _bead_rings(neighbours, max_size=8):
+    """
+    Cycles of bonded beads with no shortcut (chord) through them, up to
+    `max_size` beads, each listed once starting from its first bead.
+    """
+    rank = {b: i for i, b in enumerate(neighbours)}
+    adj = {b: set(n) for b, n in neighbours.items()}
+    rings = []
+
+    def extend(path):
+        for n in adj[path[-1]]:
+            # Only grow from the ring's first bead, never revisit, and skip
+            # beads bonded to the middle of the path (that would be a chord).
+            if rank[n] <= rank[path[0]] or n in path:
+                continue
+            if any(n in adj[p] for p in path[1:-1]):
+                continue
+            if len(path) >= 2 and path[0] in adj[n]:  # closes the ring
+                if rank[path[1]] < rank[n]:  # once, not also reversed
+                    rings.append(path + [n])
+            elif len(path) < max_size - 1:
+                extend(path + [n])
+
+    for bead in neighbours:
+        extend([bead])
+    return rings
+
+
+def _neighbours_report(neighbours, beads, resname):
+    """Text block printed by `bead_neighbours`."""
+    labels = {
+        b: f"{b} ({info['type']})" if "type" in info else b for b, info in beads.items()
+    }
+    width = max(map(len, labels.values()))
+    lines = [f"Bonded bead neighbours ({resname}, from AA bonds):"]
+    lines += [
+        f"  {labels[b]:<{width}} : {' '.join(n) or '-'}" for b, n in neighbours.items()
+    ]
+    n_pairs = sum(map(len, neighbours.values())) // 2
+    rings = ", ".join("-".join(r) for r in _bead_rings(neighbours)) or "none"
+    lines.append(f"{n_pairs} bonded pairs; bead rings: {rings}")
+    return "\n".join(lines)
