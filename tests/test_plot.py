@@ -12,7 +12,7 @@ import pytest
 
 from shaker import plot_bonded_distributions, plot_sasa_dir, set_options
 from shaker._options import _OPTIONS
-from shaker.plot import _finish_figure
+from shaker.plot import _distance_xlim, _finish_figure
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,6 @@ class TestFinishFigure:
         assert not plt.fignum_exists(fig.number)
 
 
-@pytest.mark.filterwarnings("ignore:No targets found")
 def test_plot_bonded_distributions_quiet(tmp_path):
     bins = np.linspace(0, 10, 50)
     hist = np.exp(-((bins - 5) ** 2))[None, :]
@@ -90,13 +89,22 @@ def test_bonded_report_wraps_dihedrals_and_filters(capsys):
 
     # Term 0: -179° vs 179° (2° apart across ±180); term 1: 60° shift.
     ref, cg = bonded(-179, 0), bonded(179, 60)
-    with pytest.warns(UserWarning, match="No targets found"):
-        plot_bonded_distributions(ref, cg, outfile=None, show=False)
+    plot_bonded_distributions(ref, cg, outfile=None, show=False)
     out = capsys.readouterr().out
     assert re.search(r"A-B-C-0 .* -2\.0  OC 0\.\d\d   W 2\.0  ✓", out)
     assert "2 terms: 1 ✓  0 ⚠  1 ✗, 1 mean-off" in out
 
-    with pytest.warns(UserWarning, match="No targets found"):
-        plot_bonded_distributions(ref, cg, outfile=None, show=False, only_flagged=True)
+    plot_bonded_distributions(ref, cg, outfile=None, show=False, only_flagged=True)
     out = capsys.readouterr().out
     assert "A-B-C-0" not in out and "A-B-C-1" in out
+
+
+def test_distance_xlim_keeps_4A_window_around_peaks():
+    x = np.arange(0.05, 15, 0.1)
+
+    def g(mu, sd):
+        return np.exp(-0.5 * ((x - mu) / sd) ** 2)
+
+    assert _distance_xlim(x, [g(2.2, 0.1), g(2.3, 0.1)]) == (1.5, 5.5)
+    lo, hi = _distance_xlim(x, [g(13.9, 1.0), g(12.7, 1.8)])
+    assert hi - lo == pytest.approx(4.0) and lo < 12.7 and hi > 13.9

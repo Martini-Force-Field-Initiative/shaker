@@ -1,7 +1,6 @@
 """Publication-quality distribution and SASA plots."""
 
 import math
-import warnings
 from pathlib import Path
 
 import matplotlib as mpl
@@ -21,6 +20,41 @@ try:
     _trapz = np.trapezoid
 except AttributeError:
     _trapz = np.trapz  # type: ignore[attr-defined]
+
+# SASA deviation from AA: ✓ / green band up to _SASA_OK, ⚠ / orange up to
+# _SASA_WARN, ✗ / red beyond (fractions of the AA value). The SASA axis spans
+# at least ±_SASA_WARN around the reference.
+_SASA_OK, _SASA_WARN = 0.05, 0.10
+
+# Overlap-coefficient thresholds for GOOD (✓) / WARN (⚠); below is POOR (✗).
+_OC_GOOD, _OC_WARN = 0.80, 0.65
+# How each status is shown on the bonded plot: (colour, label).
+_STATUS_STYLE = {
+    "✓": ("green", "[GOOD]"),
+    "⚠": ("orange", "[WARN]"),
+    "✗": ("red", "[POOR]"),
+}
+
+# Default dataset colours, in order: reference, first comparison, second...
+# Shared by plot_bonded_distributions and plot_sasa_dir(kind="overlay").
+_COLORS = [
+    "tab:blue",
+    "tab:red",
+    "tab:grey",
+    "tab:green",
+    "tab:orange",
+    "tab:purple",
+    "tab:brown",
+    "tab:pink",
+    "tab:olive",
+    "tab:cyan",
+]
+
+# Height of one subplot row in plot_bonded_distributions, in inches.
+_CELL_H = 1.5
+
+# Extensions matplotlib can write, e.g. {"svg", "png", "pdf", ...}.
+_IMAGE_EXTS = FigureCanvasBase.get_supported_filetypes()
 
 
 def plot_sasa_dir(
@@ -95,16 +129,28 @@ def plot_sasa_dir(
     if kind not in ("violin", "overlay"):
         raise ValueError("kind must be 'violin' or 'overlay'")
 
-    root = Path(root)
-
+    entries = _load_sasa(Path(root), xvg)
+    items = [(name, float(vals.mean()), float(vals.std())) for name, vals in entries]
     if kind == "overlay":
-        fig, ax, items = _plot_sasa_overlay(root, xvg)
+        fig, ax = _plot_sasa_overlay(entries)
     else:
-        fig, ax, items = _plot_sasa_violin(root, xvg)
+        fig, ax = _plot_sasa_violin(entries)
     _finish_figure(fig, outfile, transparent, show)
     if verbose:
         print(_sasa_report(items))
     return fig, ax, items
+
+
+def _load_sasa(root, xvg):
+    """(name, per-frame SASA) for every subdirectory of `root` holding `xvg`."""
+    entries = [
+        (d.name, _read_SASA_timeseries(d / xvg))
+        for d in sorted(root.iterdir())
+        if d.is_dir() and (d / xvg).exists()
+    ]
+    if not entries:
+        raise ValueError(f"No '{xvg}' files found under {root}")
+    return entries
 
 
 def _sasa_report(items, reference="AA"):
@@ -121,36 +167,28 @@ def _sasa_report(items, reference="AA"):
     ref = {name: mean for name, mean, _ in items}.get(reference)
     lines = [
         f"{title:<{width + 2}}  {'mean ± std':>13}"
-        + (f"   vs {reference}" if ref else "")
+        + (f"   vs {reference}" if ref is not None else "")
     ]
     for name, mean, std in items:
         line = f"  {name:<{width}}  {mean:6.2f} ± {std:4.2f}"
-        if ref and name != reference:
+        if ref is not None and name != reference:
             rel = (mean - ref) / ref
-            mark = "✓" if abs(rel) <= 0.05 else "⚠" if abs(rel) <= 0.10 else "✗"
+            mark = (
+                "✓" if abs(rel) <= _SASA_OK else "⚠" if abs(rel) <= _SASA_WARN else "✗"
+            )
             line += f"   {mean - ref:+.2f} nm²  ({rel:+.1%})  {mark}"
         lines.append(line)
     return "\n".join(lines)
 
 
-def _plot_sasa_violin(root, xvg):
+def _plot_sasa_violin(entries):
     """
-    Plot SASA as a violin chart, one column per subdirectory in `root`.
+    Plot SASA as a violin chart, one column per `_load_sasa` entry.
     See `plot_sasa_dir` (kind="violin").
     """
-    entries = [
-        (d.name, _read_SASA_timeseries(d / xvg))
-        for d in sorted(root.iterdir())
-        if d.is_dir() and (d / xvg).exists()
-    ]
-    if not entries:
-        raise ValueError(f"No '{xvg}' files found under {root}")
-
     names = [name for name, _ in entries]
     distributions = [dist for _, dist in entries]
     vals = [dist.mean() for dist in distributions]
-    errs = [dist.std() for dist in distributions]
-    items = list(zip(names, vals, errs))
     x = np.arange(len(names))
 
     fig, ax = plt.subplots(figsize=(max(6, 0.8 * len(names)), 4), tight_layout=True)
@@ -161,12 +199,11 @@ def _plot_sasa_violin(root, xvg):
     if "AA" in names:
         aa_val = vals[names.index("AA")]
 
-    # y-axis limits: default to mean ± 12.5 % around the AA reference (a
-    # little past the outermost ">10 %" deviation band), but widen to the
-    # actual data range if any distribution extends beyond that window,
-    # so nothing gets clipped.
+    # y-axis limits: the AA reference ± _SASA_WARN (10 %), widened to the
+    # actual data range if any distribution extends beyond it, so nothing
+    # gets clipped.
     ref_mean = aa_val if aa_val is not None else float(np.mean(vals))
-    window = ref_mean * 0.125
+    window = ref_mean * _SASA_WARN
     dist_min = min(dist.min() for dist in distributions)
     dist_max = max(dist.max() for dist in distributions)
     y_min = min(ref_mean - window, dist_min)
@@ -176,9 +213,14 @@ def _plot_sasa_violin(root, xvg):
     legend_patches = []
     if aa_val is not None:
         bands = [
-            (0.00, 0.05, "#2ecc71", "0–5 % from AA"),
-            (0.05, 0.10, "#e67e22", "5–10 % from AA"),
-            (0.10, None, "#e74c3c", ">10 % from AA"),
+            (0.00, _SASA_OK, "#2ecc71", f"0–{_SASA_OK:.0%} from AA"),
+            (
+                _SASA_OK,
+                _SASA_WARN,
+                "#e67e22",
+                f"{_SASA_OK:.0%}–{_SASA_WARN:.0%} from AA",
+            ),
+            (_SASA_WARN, None, "#e74c3c", f">{_SASA_WARN:.0%} from AA"),
         ]
         for lo, hi, color, label in bands:
             if hi is None:
@@ -249,37 +291,15 @@ def _plot_sasa_violin(root, xvg):
             framealpha=0.8,
         )
 
-    return fig, ax, items
+    return fig, ax
 
 
-_SASA_OVERLAY_COLORS = [
-    "tab:blue",
-    "tab:red",
-    "tab:green",
-    "tab:orange",
-    "tab:purple",
-    "tab:brown",
-    "tab:pink",
-    "tab:gray",
-    "tab:olive",
-    "tab:cyan",
-]
-
-
-def _plot_sasa_overlay(root, xvg, bins=60):
+def _plot_sasa_overlay(entries, bins=60):
     """
-    Plot per-frame SASA distributions for every subdirectory in `root` as
+    Plot per-frame SASA distributions for every `_load_sasa` entry as
     overlaid density curves, in the same visual style as
     `plot_bonded_distributions`. See `plot_sasa_dir` (kind="overlay").
     """
-    entries = [
-        (d.name, _read_SASA_timeseries(d / xvg))
-        for d in sorted(root.iterdir())
-        if d.is_dir() and (d / xvg).exists()
-    ]
-    if not entries:
-        raise ValueError(f"No '{xvg}' files found under {root}")
-
     names = [name for name, _ in entries]
     means = {name: vals.mean() for name, vals in entries}
     all_vals = np.concatenate([vals for _, vals in entries])
@@ -298,16 +318,13 @@ def _plot_sasa_overlay(root, xvg, bins=60):
     # comparison dataset tab:red, matching plot_bonded_distributions'
     # convention, rather than whatever order subdirectories sort in.
     plot_order = [ref_name] + [n for n in names if n != ref_name]
-    colors = {
-        name: _SASA_OVERLAY_COLORS[i % len(_SASA_OVERLAY_COLORS)]
-        for i, name in enumerate(plot_order)
-    }
+    colors = {name: _COLORS[i % len(_COLORS)] for i, name in enumerate(plot_order)}
 
-    # x-axis limits: default to mean ± 12.5 % around the reference (AA, or
-    # the first dataset if there's no AA), widened to the actual data range
-    # if any distribution extends beyond that window, so nothing is clipped.
+    # x-axis limits: the reference (AA, or the first dataset if there's no
+    # AA) ± _SASA_WARN (10 %), widened to the actual data range if any
+    # distribution extends beyond it, so nothing is clipped.
     ref_mean = means[ref_name]
-    window = ref_mean * 0.125
+    window = ref_mean * _SASA_WARN
     x_min = min(ref_mean - window, all_vals.min())
     x_max = max(ref_mean + window, all_vals.max())
 
@@ -320,9 +337,14 @@ def _plot_sasa_overlay(root, xvg, bins=60):
     legend_patches = []
     if aa_val is not None:
         bands = [
-            (0.00, 0.05, "#2ecc71", "0–5 % from AA"),
-            (0.05, 0.10, "#e67e22", "5–10 % from AA"),
-            (0.10, None, "#e74c3c", ">10 % from AA"),
+            (0.00, _SASA_OK, "#2ecc71", f"0–{_SASA_OK:.0%} from AA"),
+            (
+                _SASA_OK,
+                _SASA_WARN,
+                "#e67e22",
+                f"{_SASA_OK:.0%}–{_SASA_WARN:.0%} from AA",
+            ),
+            (_SASA_WARN, None, "#e74c3c", f">{_SASA_WARN:.0%} from AA"),
         ]
         for lo, hi, color, label in bands:
             if hi is None:
@@ -382,8 +404,7 @@ def _plot_sasa_overlay(root, xvg, bins=60):
         framealpha=0.8,
     )
 
-    items = [(name, float(means[name]), float(vals.std())) for name, vals in entries]
-    return fig, ax, items
+    return fig, ax
 
 
 def plot_bonded_distributions(
@@ -417,7 +438,9 @@ def plot_bonded_distributions(
         Labels for each bonded dictionary. If None, uses Dataset 1, Dataset 2, ...
 
     colors : list[str] | None, optional
-        Line colors for each bonded dictionary. If None, matplotlib default cycle is used.
+        Line colors for each bonded dictionary. If None (or for None entries),
+        the default palette is used: tab:blue, tab:red, tab:grey, then the
+        other tab: colours.
 
     outfile : str | Path | None, optional
         Where to save the figure: as SVG (`<outfile>.svg`) unless it ends in
@@ -469,14 +492,10 @@ def plot_bonded_distributions(
     if len(bonded_dicts) == 0:
         raise ValueError("At least one bonded dictionary must be provided.")
 
-    if metrics and len(bonded_dicts) == 1:
-        warnings.warn(
-            "metrics=True has no effect with a single dataset — nothing to compare against."
-        )
-
     categories = ("distances", "angles", "dihedrals")
 
-    # Check that all dictionaries share the same targets
+    # Check that all dictionaries share the same targets and bins (the
+    # metrics compare histograms bin by bin).
     ref = bonded_dicts[0]
     for cat in categories:
         ref_targets = ref[cat]["targets"]
@@ -485,6 +504,13 @@ def plot_bonded_distributions(
                 raise ValueError(
                     f"Mismatch in '{cat}' targets between input 0 and input {idx}."
                 )
+            if ref_targets and not np.array_equal(
+                bonded[cat]["bins"], ref[cat]["bins"]
+            ):
+                raise ValueError(
+                    f"Mismatch in '{cat}' bins between input 0 and input {idx}; "
+                    "measure both with the same bins_* arguments."
+                )
 
     # Labels
     if labels is None:
@@ -492,33 +518,35 @@ def plot_bonded_distributions(
     if len(labels) != len(bonded_dicts):
         raise ValueError("Length of 'labels' must match number of bonded dictionaries.")
 
-    # Colors — resolve None entries against the default matplotlib color cycle
-    prop_cycle_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    # Colors — None entries fall back to the default palette
     resolved_colors = [
-        c if c is not None else prop_cycle_colors[i % len(prop_cycle_colors)]
+        c if c is not None else _COLORS[i % len(_COLORS)]
         for i, c in enumerate(colors or [None] * len(bonded_dicts))
     ]
     if len(resolved_colors) != len(bonded_dicts):
         raise ValueError("Length of 'colors' must match number of bonded dictionaries.")
 
-    # Filter out empty categories, warning the user for each one skipped
-    active_categories = []
-    for cat in categories:
-        if len(ref[cat]["targets"]) == 0:
-            warnings.warn(f"No targets found for '{cat}' — skipping this block.")
-        else:
-            active_categories.append(cat)
+    # Categories without targets (e.g. no dihedrals) are simply left out.
+    active_categories = [cat for cat in categories if len(ref[cat]["targets"])]
 
     if not active_categories:
         raise ValueError(
             "All categories (distances, angles, dihedrals) are empty — nothing to plot."
         )
 
-    xlim_map = {
-        "distances": (1.5, 5.5),
-        "angles": (0, 180),
-        "dihedrals": (-180, 180),
-    }
+    # Metrics for every comparison dataset vs the reference, computed once and
+    # used for both the panel annotations and the text report. Keyed by
+    # (category, target index).
+    summaries = [
+        {
+            (cat, i): row
+            for cat in active_categories
+            for i, row in enumerate(_bonded_summary(ref, other, [cat]))
+        }
+        for other in bonded_dicts[1:]
+    ]
+
+    xlim_map = {"angles": (0, 180), "dihedrals": (-180, 180)}  # distances: from data
 
     # Layout helpers
     grids = {cat: _best_grid(len(ref[cat]["targets"])) for cat in active_categories}
@@ -530,8 +558,7 @@ def plot_bonded_distributions(
     # GridSpec, so we insert explicit zero-height spacer rows instead.
     n_cats = len(active_categories)
     spacer_height = 0.3  # inches — tune this for more/less gap
-    cell_h = 1.5  # must match _predict_figsize
-    spacer_ratio = spacer_height / cell_h
+    spacer_ratio = spacer_height / _CELL_H
 
     interleaved_ratios = []
     for k, r in enumerate(height_ratios):
@@ -555,7 +582,7 @@ def plot_bonded_distributions(
         spacer_ax.set_visible(False)
 
     xlabel_map = {
-        "distances": "Bond (Å)",
+        "distances": "Distance (Å)",
         "angles": "Angle (°)",
         "dihedrals": "Dihedral angle (°)",
     }
@@ -590,27 +617,12 @@ def plot_bonded_distributions(
             ref_bins = ref[cat]["bins"]
             ref_hist = np.asarray(ref[cat]["hist"][i])
 
-            # plot reference (dataset 0)
-            ax.plot(ref_bins, ref_hist, label=labels[0], color=resolved_colors[0])
-
-            if show_peaks and len(ref_hist) > 0:
-                peak_idx = np.argmax(ref_hist)
-                ax.text(
-                    ref_bins[peak_idx],
-                    ref_hist[peak_idx],
-                    f"{ref_bins[peak_idx]:.2f}",
-                    color=resolved_colors[0],
-                    fontsize=6,
-                    va="bottom",
-                    ha="center",
-                )
-
-            # plot subsequent datasets, optionally compute metrics vs reference
-            # Each entry is (text, color) so each comparison gets its own colour.
+            # Plot every dataset; compare each one after the first against the
+            # reference (dataset 0). Each metrics entry is (text, color) so
+            # each comparison gets its own colour.
             metrics_lines = []
-
             for j, (bonded, label, color) in enumerate(
-                zip(bonded_dicts[1:], labels[1:], resolved_colors[1:]), start=1
+                zip(bonded_dicts, labels, resolved_colors)
             ):
                 bins = bonded[cat]["bins"]
                 hist = np.asarray(bonded[cat]["hist"][i])
@@ -629,32 +641,22 @@ def plot_bonded_distributions(
                         ha="center",
                     )
 
-                if metrics:
-                    overlap_y = np.minimum(ref_hist, hist)
-
+                if metrics and j > 0:
                     # Shade the overlapping region (kept out of the legend —
                     # it's visually self-evident, and an entry per comparison
                     # dataset would make the legend grow unboundedly).
                     ax.fill_between(
-                        ref_bins,
-                        overlap_y,
-                        alpha=0.15,
-                        color=color,
+                        ref_bins, np.minimum(ref_hist, hist), alpha=0.15, color=color
                     )
 
-                    oc, w_dist = _distribution_metrics(
-                        ref_bins, ref_hist, bins, hist, periodic=cat == "dihedrals"
-                    )
-
-                    if oc >= _OC_GOOD:
-                        line_color, status = "green", "[GOOD]"
-                    elif oc >= _OC_WARN:
-                        line_color, status = "orange", "[WARN]"
-                    else:
-                        line_color, status = "red", "[POOR]"
-
+                    row = summaries[j - 1][cat, i]
+                    line_color, status = _STATUS_STYLE[row["status"]]
+                    d = 2 if cat == "distances" else 1  # decimals: Å vs degrees
                     metrics_lines.append(
-                        (f"{label}  W={w_dist:.3f}  OC={oc:.3f}  {status}", line_color)
+                        (
+                            f"{label}  W={row['w']:.{d}f}  OC={row['oc']:.2f}  {status}",
+                            line_color,
+                        )
                     )
 
             # Annotate metrics in the upper-right corner, one text call per line
@@ -686,9 +688,12 @@ def plot_bonded_distributions(
             valid_maxes = [h.max() for h in all_hists if len(h) > 0 and h.max() > 0]
             y_max = max(valid_maxes) if valid_maxes else 1.0
             ax.set_ylim(0, y_max * 1.2)
-            ax.set_xlim(xlim_map[cat])
+            if cat == "distances":
+                ax.set_xlim(_distance_xlim(ref_bins, all_hists))
+            else:
+                ax.set_xlim(xlim_map[cat])
 
-            ax.set_title("-".join(distribution), fontweight="bold")
+            ax.set_title("-".join(map(str, distribution)), fontweight="bold")
             ax.legend(
                 loc="upper left",
                 fontsize=5,
@@ -704,13 +709,38 @@ def plot_bonded_distributions(
             ax.set_ylabel("Prob. density")
 
     _finish_figure(fig, outfile, transparent, show)
-    if verbose and len(bonded_dicts) > 1:
-        print(_bonded_report(bonded_dicts, labels, active_categories, only_flagged))
+    if verbose and summaries:
+        print(_bonded_report(summaries, labels, only_flagged))
     return fig
 
 
-# Overlap-coefficient thresholds for GOOD (✓) / WARN (⚠); below is POOR (✗).
-_OC_GOOD, _OC_WARN = 0.80, 0.65
+def _oc_status(oc):
+    """✓ / ⚠ / ✗ for an overlap coefficient."""
+    return "✓" if oc >= _OC_GOOD else "⚠" if oc >= _OC_WARN else "✗"
+
+
+def _distance_xlim(bins, hists, default=(1.5, 5.5), width=4.0, frac=0.01):
+    """
+    x-limits for a distance panel: `default` unless some dataset has
+    significant density (> `frac` of its peak) outside it; then a window of
+    the same `width` (Å) centred between the datasets' peaks, so panels stay
+    comparable at a glance (tails of very broad distributions may be cut).
+    """
+    bins = np.asarray(bins, float)
+    present = np.zeros(bins.size, bool)
+    peaks = []
+    for h in hists:
+        h = np.nan_to_num(np.asarray(h, float))
+        if h.size and h.max() > 0:
+            present |= h > frac * h.max()
+            peaks.append(bins[np.argmax(h)])
+    if not peaks:
+        return default
+    lo, hi = bins[present].min(), bins[present].max()
+    if default[0] <= lo and hi <= default[1]:
+        return default
+    center = max((min(peaks) + max(peaks)) / 2, width / 2)  # never below 0 Å
+    return float(center - width / 2), float(center + width / 2)
 
 
 def _distribution_metrics(ref_bins, ref_hist, bins, hist, periodic=False):
@@ -777,22 +807,23 @@ def _bonded_summary(ref, other, categories=("distances", "angles", "dihedrals"))
                     "delta": delta,
                     "oc": float(oc),
                     "w": float(w),
-                    "status": "✓" if oc >= _OC_GOOD else "⚠" if oc >= _OC_WARN else "✗",
+                    "status": _oc_status(oc),
                     "mean_off": abs(delta) > ref_sd,
                 }
             )
     return summary
 
 
-def _bonded_report(bonded_dicts, labels, categories, only_flagged=False):
+def _bonded_report(summaries, labels, only_flagged=False):
     """
-    Text report for `plot_bonded_distributions`: one block per dataset vs the
-    reference (first), one line per term (from `_bonded_summary`), then a
-    count line.
+    Text report for `plot_bonded_distributions`: one block per comparison
+    dataset vs the reference (first label), one line per term, then a count
+    line. `summaries` holds one `_bonded_summary` result per comparison, as a
+    dict in term order.
     """
     blocks = []
-    for other, label in zip(bonded_dicts[1:], labels[1:]):
-        summary = _bonded_summary(bonded_dicts[0], other, categories)
+    for summary, label in zip(summaries, labels[1:]):
+        summary = list(summary.values())
         rows = [
             ("", "", f"{labels[0]} mean ± sd", f"{label} mean ± sd", "Δ", "", "", "")
         ]
@@ -848,10 +879,6 @@ def _figure_path(outfile, tag=None):
     return path.with_name(stem + (ext or ".svg"))
 
 
-# Extensions matplotlib can write, e.g. {"svg", "png", "pdf", ...}.
-_IMAGE_EXTS = FigureCanvasBase.get_supported_filetypes()
-
-
 def _finish_figure(fig, outfile, transparent, show, tag=None):
     """
     Save `fig` (see `_figure_path`; None saves nothing), then close it unless
@@ -877,11 +904,7 @@ def _read_SASA_timeseries(xvg):
     Reader for the SASA-vs-time .xvg file (`gmx sasa -o`). Retrieves the
     per-frame total SASA values, ignoring the time column.
     """
-    rows = [
-        l.split() for l in Path(xvg).read_text().splitlines() if l and l[0] not in "#@"
-    ]
-    a = np.array(rows, float)
-    return a[:, 1]
+    return np.loadtxt(xvg, comments=("#", "@"), usecols=1, ndmin=1)
 
 
 def _best_grid(n: int):
@@ -896,7 +919,7 @@ def _best_grid(n: int):
 def _predict_figsize(
     grids,
     cell_w=3.2,
-    cell_h=1.5,
+    cell_h=_CELL_H,
     section_gap_h=0.6,
     left=0.8,
     right=0.2,
