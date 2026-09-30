@@ -14,6 +14,7 @@ __all__ = [
     "__version__",
     "align_mol_to_single_traj",
     "assess_overlap_matrix",
+    "bead_neighbours",
     "bonded_estimator",
     "dihedral_fitting",
     "estimator",
@@ -67,7 +68,7 @@ from . import (
 )
 from .estimator import bonded_estimator
 from .itp import write_initial_CGitp
-from .mapper import map_aa2cg
+from .mapper import bead_neighbours, map_aa2cg
 from .measurer import measure_bonded_terms
 from .options import set_options
 from .overlap import assess_overlap_matrix
