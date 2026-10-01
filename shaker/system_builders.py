@@ -378,8 +378,13 @@ def runSim(
       `N LINCS warnings`.
 
     If a stage fails, its line ends with `✗ failed` and the error shows the
-    last lines of GROMACS output. `run_status` prints the same result lines
-    for a finished run directory.
+    last lines of GROMACS output.
+
+    The run folder also gets `runSim.status`, for watching a run from outside
+    the notebook: its first line is `runSim · running <stage>`, then
+    `runSim · done` (with the new iteration folder) or `runSim · failed
+    <stage>` (with a short reason), each with a timestamp; below it, the
+    result line of every finished stage, as above.
     """
 
     if minMDP is None:
@@ -405,58 +410,90 @@ def runSim(
     verbose = _resolve(verbose, "verbose")
     if verbose and not stream_gmx:
         print("runSim · output → gmx_run.log")
-    with contextlib.ExitStack() as stack:
-        # Not streaming: all gmx output goes to gmx_run.log; errors still
-        # show its tail.
-        log = None if stream_gmx else stack.enter_context(open("gmx_run.log", "w"))
-        for prefix, mdp, coords, opt in stages:
-            label = f"  {_STAGES[prefix]:<6} "
-            # The stage's line starts now and grows while it runs (unless gmx
-            # output is streamed, which shows progress itself). Minimization
-            # gets no % (it usually stops well before nsteps).
-            line = None
-            if verbose and not stream_gmx:
-                line = _StageLine(label, None if prefix == "m" else f"{prefix}.log")
-            try:
-                _run(
-                    [
-                        gmx,
-                        "grompp",
-                        "-f",
-                        str(mdp),
-                        "-c",
-                        coords,
-                        "-p",
-                        "topol.top",
-                        "-o",
-                        f"{prefix}.tpr",
-                        "-maxwarn",
-                        str(maxwarn),
-                    ],
-                    log=log,
-                    env=env,
-                )
-                _run_mdrun(
-                    [gmx, "mdrun", "-v", "-deffnm", prefix, *shlex.split(opt)],
-                    log=log,
-                    env=env,
-                    hang_timeout=hang_timeout,
-                    on_output=line,
-                )
-            except BaseException:
-                if line is not None:  # end the line, so the error starts on its own
-                    line.finish("✗ failed")
-                raise
-            # Result, e.g. so a -maxh-truncated production doesn't go unnoticed.
-            result = _stage_result(_stage_report(f"{prefix}.log"))
-            if line is not None:
-                line.finish(result)
-            elif verbose:  # streaming: after mdrun's own output
-                print(label + result)
+    # runSim.status in the run folder tells watchers (e.g. agents that can't
+    # see the cell) where the run is: "running <stage>", then "done" or
+    # "failed <stage>" (with the reason), followed by the finished stages.
+    finished, stage, iter_dir = [], "setup", None
+    try:
+        with contextlib.ExitStack() as stack:
+            # Not streaming: all gmx output goes to gmx_run.log; errors still
+            # show its tail.
+            log = None if stream_gmx else stack.enter_context(open("gmx_run.log", "w"))
+            for prefix, mdp, coords, opt in stages:
+                stage = _STAGES[prefix]
+                _write_status(f"running {stage}", finished)
+                label = f"  {stage:<6} "
+                # The stage's line starts now and grows while it runs (unless gmx
+                # output is streamed, which shows progress itself). Minimization
+                # gets no % (it usually stops well before nsteps).
+                line = None
+                if verbose and not stream_gmx:
+                    line = _StageLine(label, None if prefix == "m" else f"{prefix}.log")
+                try:
+                    _run(
+                        [
+                            gmx,
+                            "grompp",
+                            "-f",
+                            str(mdp),
+                            "-c",
+                            coords,
+                            "-p",
+                            "topol.top",
+                            "-o",
+                            f"{prefix}.tpr",
+                            "-maxwarn",
+                            str(maxwarn),
+                        ],
+                        log=log,
+                        env=env,
+                    )
+                    _run_mdrun(
+                        [gmx, "mdrun", "-v", "-deffnm", prefix, *shlex.split(opt)],
+                        log=log,
+                        env=env,
+                        hang_timeout=hang_timeout,
+                        on_output=line,
+                    )
+                except BaseException:
+                    if line is not None:  # end the line, so the error starts on its own
+                        line.finish("✗ failed")
+                    raise
+                # Result, e.g. so a -maxh-truncated production doesn't go unnoticed.
+                result = _stage_result(_stage_report(f"{prefix}.log"))
+                finished.append(label + result + "\n")
+                if line is not None:
+                    line.finish(result)
+                elif verbose:  # streaming: after mdrun's own output
+                    print(label + result)
 
-    if cleanTraj:
-        _traj_cleanup("p.gro", "p.xtc", "p.tpr", gmx_loc=gmx_loc)
-        _checkpoint(mapping=mapping, keep_last=keep_last)
+        if cleanTraj:
+            stage = "cleanup"
+            _write_status("running cleanup", finished)
+            _traj_cleanup("p.gro", "p.xtc", "p.tpr", gmx_loc=gmx_loc)
+            iter_dir = _checkpoint(mapping=mapping, keep_last=keep_last)
+    except BaseException as err:
+        _write_status(f"failed {stage}", finished, _failure_reason(err))
+        raise
+    _write_status("done", finished, f"→ {iter_dir.name}" if iter_dir else "")
+
+
+def _write_status(state, finished, detail=""):
+    """
+    Write runSim.status: one status line (state, timestamp, detail), then the
+    result lines of the stages finished so far, as printed in the cell.
+    """
+    line = f"runSim · {state}   {time.strftime('%Y-%m-%d %H:%M:%S')}   {detail}"
+    Path("runSim.status").write_text(line.rstrip() + "\n" + "".join(finished))
+
+
+def _failure_reason(err):
+    """Short reason for the status file; the full error is raised as usual."""
+    if isinstance(err, KeyboardInterrupt):
+        return "interrupted"
+    if isinstance(err, subprocess.CalledProcessError):
+        return f"gmx exit status {err.returncode}"
+    return (str(err).splitlines() or [type(err).__name__])[0]
 
 
 def list_iterations(run_dir):
@@ -630,54 +667,6 @@ def _iteration_table(run_dir):
         "bead pairs; bonded = terms per mark, as in plot_bonded_distributions)"
     )
     return "\n".join(lines)
-
-
-def run_status(run_dir=".", verbose=None):
-    """
-    Report on the last `runSim` in `run_dir`, read from its m/r/p .log files.
-
-    Useful when you did not watch the run yourself (the kernel died, an old
-    folder, an agent picking up where it left off). `runSim` prints the same
-    per-stage lines when it finishes.
-
-    Parameters
-    ----------
-    run_dir : str or Path, optional
-        Directory `runSim` was executed in. Default is ".".
-    verbose : bool or None, optional
-        Whether to print one line per stage plus a summary line. None
-        (default) uses the SHAKER-wide setting (see `set_options`), which is
-        True unless changed.
-
-    Returns
-    -------
-    dict
-        {"min"/"rel"/"prod": stage dict or None if no log,
-         "done": cleaned trajectory present, "crash_files": [...],
-         "iterations": [...]}. Stage dicts hold: finished, integrator,
-        nsteps, steps_done, dt, ns_per_day, wall_s, stopped_early,
-        lincs_warnings, fmax and emtol (minimization only).
-    """
-    run_dir = Path(run_dir)
-    status = {
-        name: _stage_report(run_dir / f"{prefix}.log")
-        for prefix, name in _STAGES.items()
-    }
-    status["done"] = (run_dir / "pbc.pdb").is_file() and (run_dir / "pbc.xtc").is_file()
-    status["crash_files"] = sorted(
-        p.name for pattern in ("step*.pdb", "crash*") for p in run_dir.glob(pattern)
-    )
-    status["iterations"] = [p.name for p in list_iterations(run_dir)]
-
-    if _resolve(verbose, "verbose"):
-        for name in _STAGES.values():
-            print(f"  {name:<6} {_stage_result(status[name])}")
-        crash = ", ".join(status["crash_files"]) or "none"
-        print(
-            f"  cleaned traj: {'yes' if status['done'] else 'no'}   "
-            f"iterations: {len(status['iterations'])}   crash files: {crash}"
-        )
-    return status
 
 
 def _stage_report(log_path):
