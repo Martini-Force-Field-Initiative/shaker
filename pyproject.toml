@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-lint = ["ruff==0.16.7", "nbqa", "pre-commit"]
+lint = ["ruff==0.16.9", "nbqa", "pre-commit"]
 typecheck = ["mypy", "types-tqdm", "scipy-stubs"]
 test = ["pytest"]
 docs = ["sphinx", "sphinx-design","pydata-sphinx-theme","numpydoc","myst-nb"]
