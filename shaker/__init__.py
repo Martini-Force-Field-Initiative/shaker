@@ -42,7 +42,6 @@ __all__ = [
     "render_mapping",
     "runSim",
     "run_SASA",
-    "run_status",
     "sasa",
     "set_options",
     "system_builders",
@@ -80,7 +79,6 @@ from .system_builders import (
     list_iterations,
     prepare_setup_water,
     record_iteration,
-    run_status,
     runSim,
 )
 from .vsites import (

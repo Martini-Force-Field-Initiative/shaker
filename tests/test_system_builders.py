@@ -14,10 +14,11 @@ import pytest
 from shaker.system_builders import (
     _checkpoint,
     _run_mdrun,
+    _stage_report,
+    _stage_result,
     _StageLine,
     list_iterations,
     record_iteration,
-    run_status,
 )
 
 DATA = Path(__file__).parent / "data"
@@ -196,26 +197,20 @@ class TestRunMdrun:
         assert time.monotonic() - start < 15
 
 
-class TestRunStatus:
-    def test_finished_production(self, tmp_path, capsys):
-        shutil.copy(DATA / "min_finished.log", tmp_path / "m.log")
-        shutil.copy(FINISHED_LOG, tmp_path / "p.log")
-        _make_cleaned_traj(tmp_path)
+class TestStageLogs:
+    """The m/r/p .log parsing behind runSim's per-stage lines."""
 
-        status = run_status(tmp_path)
+    def test_finished_minimization_and_production(self):
+        m = _stage_report(DATA / "min_finished.log")
+        p = _stage_report(FINISHED_LOG)
 
-        assert status["min"]["steps_done"] == 3491
-        assert status["min"]["fmax"] == pytest.approx(24.808376)
+        assert m["steps_done"] == 3491 and m["fmax"] == pytest.approx(24.808376)
+        assert p["finished"] and not p["stopped_early"]
+        assert p["steps_done"] == p["nsteps"] == 10000000
+        assert _stage_result(m) == "3491 steps   Fmax 24.8 (target 10)   ✓"
+        assert _stage_result(p) == "200.0/200.0 ns   31733 ns/day   0:09:05   ✓"
 
-        prod = status["prod"]
-        assert prod["finished"] and not prod["stopped_early"]
-        assert prod["steps_done"] == prod["nsteps"] == 10000000
-        assert status["rel"] is None and status["done"]
-        out = capsys.readouterr().out
-        assert "  min    3491 steps   Fmax 24.8 (target 10)   ✓\n" in out
-        assert "  prod   200.0/200.0 ns   31733 ns/day   0:09:05   ✓\n" in out
-
-    def test_flags_truncated_run_with_lincs_warnings(self, tmp_path, capsys):
+    def test_flags_truncated_run_with_lincs_warnings(self, tmp_path):
         log = FINISHED_LOG.read_text()
         log = log.replace("Statistics over 10000001", "Statistics over 3000001")
         log = log.replace(
@@ -224,11 +219,10 @@ class TestRunStatus:
         )
         (tmp_path / "p.log").write_text(log)
 
-        run_status(tmp_path)
+        result = _stage_result(_stage_report(tmp_path / "p.log"))
 
-        out = capsys.readouterr().out
-        assert "60.0/200.0 ns" in out
-        assert "⚠ stopped early · 1 LINCS warnings" in out
+        assert result.startswith("60.0/200.0 ns")
+        assert result.endswith("⚠ stopped early · 1 LINCS warnings")
 
 
 def test_stage_line_is_append_only(tmp_path, capsys):
@@ -291,3 +285,24 @@ class TestRecordIteration:
     def test_no_iterations_raises(self, tmp_path):
         with pytest.raises(ValueError, match="run runSim first"):
             record_iteration(tmp_path)
+
+
+def test_runsim_status_file(monkeypatch):
+    import shaker.system_builders as sb
+
+    def mdrun_failing_in_prod(cmd, **kwargs):
+        if cmd[4] == "p":  # -deffnm p
+            raise RuntimeError("mdrun hung (no output for 600 s) and was killed.\nmore")
+
+    monkeypatch.setattr(sb, "_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sb, "_run_mdrun", mdrun_failing_in_prod)
+    with pytest.raises(RuntimeError):
+        sb.runSim(cleanTraj=False, verbose=False)
+    status = Path("runSim.status").read_text().splitlines()
+    assert status[0].startswith("runSim · failed prod")
+    assert status[0].endswith("mdrun hung (no output for 600 s) and was killed.")
+    assert [line.split()[0] for line in status[1:]] == ["min", "rel"]
+
+    monkeypatch.setattr(sb, "_run_mdrun", lambda *args, **kwargs: None)
+    sb.runSim(cleanTraj=False, verbose=False)
+    assert Path("runSim.status").read_text().startswith("runSim · done")

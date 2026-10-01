@@ -27,8 +27,8 @@ def set_options(show=None, verbose=None, progress=None):
         at import is True.
     verbose : bool, optional
         Whether functions print SHAKER's own text output: reports and
-        summaries (SASA, bonded, overlap), `runSim`'s per-stage lines,
-        `run_status` and the mapping report. Warnings and errors are always
+        summaries (SASA, bonded, overlap, iterations), `runSim`'s per-stage
+        lines, bead neighbours and the mapping report. Warnings and errors are always
         shown. Default at import is True.
     progress : bool, optional
         Whether to show progress bars (mapping, measuring, overlap,
