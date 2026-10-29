@@ -3,7 +3,9 @@
 import warnings
 
 import numpy as np
-from tqdm.autonotebook import tqdm
+
+from .helper import _BINS_ANGL, _BINS_DIHED, _BINS_DIST, _density_histograms
+from .options import _progress
 
 warnings.filterwarnings(
     "ignore",
@@ -31,8 +33,7 @@ def measure_bonded_terms(
     bins_dist=None,
     bins_angl=None,
     bins_dihed=None,
-    save_npy=False,
-    outname="",
+    save_npy=None,
 ):
     """
     Measure bonded distributions (distances, angles, and dihedrals) from a trajectory.
@@ -63,15 +64,18 @@ def measure_bonded_terms(
     stride : int, optional
         Frame stride used when iterating through the trajectory (default is 1).
     bins_dist : array-like, optional
-        Bin edges used for distance histograms.
+        Bin edges for distance histograms (Å). Default 0–50 Å in 0.2 Å steps.
     bins_angl : array-like, optional
-        Bin edges used for angle histograms.
+        Bin edges for angle histograms (°). Default 0–180° in 2° steps.
     bins_dihed : array-like, optional
-        Bin edges used for dihedral histograms.
-    save_npy : bool, optional
-        If True, raw measurements and histogram data are saved to `.npy` files.
-    outname : str, optional
-        Prefix used for saved output files. Required if `save_npy=True`.
+        Bin edges for dihedral histograms (°). Default -180–180° in 2° steps.
+
+        Values outside the bins are dropped by the histogram, so a warning
+        names any term that has them.
+    save_npy : str or None, optional
+        If given, a filename prefix: raw measurements and histograms are
+        saved as ``{save_npy}_distances/angles/dihedrals/hists.npy``.
+        Default None (not saved).
 
     Returns
     -------
@@ -97,23 +101,9 @@ def measure_bonded_terms(
       ``u.trajectory[start:stop:stride]``.
     """
 
-    if save_npy and not outname:
-        raise ValueError("outname must be provided when save_npy=True")
-
-    if bins_dist is None:
-        bins_dist = np.arange(0, 15, 0.2)
-    else:
-        bins_dist = np.asarray(bins_dist)
-
-    if bins_angl is None:
-        bins_angl = np.arange(-1, 181, 2)
-    else:
-        bins_angl = np.asarray(bins_angl)
-
-    if bins_dihed is None:
-        bins_dihed = np.arange(-181, 181, 2)
-    else:
-        bins_dihed = np.asarray(bins_dihed)
+    bins_dist = _BINS_DIST if bins_dist is None else np.asarray(bins_dist)
+    bins_angl = _BINS_ANGL if bins_angl is None else np.asarray(bins_angl)
+    bins_dihed = _BINS_DIHED if bins_dihed is None else np.asarray(bins_dihed)
 
     bins_dist_x = (bins_dist[1:] + bins_dist[:-1]) / 2
     bins_angl_x = (bins_angl[1:] + bins_angl[:-1]) / 2
@@ -126,7 +116,7 @@ def measure_bonded_terms(
     # print('Calculating distributions...')
     resids = np.unique(u.select_atoms(f"resname {resname}").resids)
 
-    for resid in tqdm(resids, desc="Measuring Bonded parameters"):
+    for resid in _progress(resids, desc="Measuring Bonded parameters"):
         dists = [
             _beadstodistance(u, resid, resname, a, resid, resname, b)
             for (a, b) in dist_tgts
@@ -165,37 +155,38 @@ def measure_bonded_terms(
                 dihed_out[i].append(dihed.value())
 
     # print('Histogramming...')
-    dist_hist = [
-        np.histogram(vals, bins=bins_dist, density=True)[0] for vals in dist_out
-    ]
-    ang_hist = [np.histogram(vals, bins=bins_angl, density=True)[0] for vals in ang_out]
-    dihed_hist = [
-        np.histogram(vals, bins=bins_dihed, density=True)[0] for vals in dihed_out
-    ]
+    def _names(tgts):
+        return ["-".join(map(str, t)) for t in tgts]
+
+    dist_hist = _density_histograms(dist_out, bins_dist, _names(dist_tgts), "bins_dist")
+    ang_hist = _density_histograms(ang_out, bins_angl, _names(ang_tgts), "bins_angl")
+    dihed_hist = _density_histograms(
+        dihed_out, bins_dihed, _names(dihed_tgts), "bins_dihed"
+    )
 
     results = {
         "distances": {
             "bins": bins_dist_x,
-            "hist": np.array(dist_hist),
+            "hist": dist_hist,
             "targets": dist_tgts,
         },
         "angles": {
             "bins": bins_angl_x,
-            "hist": np.array(ang_hist),
+            "hist": ang_hist,
             "targets": ang_tgts,
         },
         "dihedrals": {
             "bins": bins_dihed_x,
-            "hist": np.array(dihed_hist),
+            "hist": dihed_hist,
             "targets": dihed_tgts,
         },
     }
 
-    if save_npy:
-        np.save(f"{outname}_angles.npy", ang_out)
-        np.save(f"{outname}_distances.npy", dist_out)
-        np.save(f"{outname}_dihedrals.npy", dihed_out)
-        np.save(f"{outname}_hists.npy", results)
+    if save_npy is not None:
+        np.save(f"{save_npy}_angles.npy", ang_out)
+        np.save(f"{save_npy}_distances.npy", dist_out)
+        np.save(f"{save_npy}_dihedrals.npy", dihed_out)
+        np.save(f"{save_npy}_hists.npy", results)
 
     return results
 

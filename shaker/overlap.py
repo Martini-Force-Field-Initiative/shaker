@@ -5,7 +5,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import gridspec, ticker
 from MDAnalysis.analysis.distances import self_distance_array
-from tqdm.autonotebook import tqdm
+
+from .helper import _BINS_DIST, _density_histograms
+from .options import _progress, _resolve
+from .plot import (
+    _OC_GOOD,
+    _OC_WARN,
+    _finish_figure,
+    _oc_status,
+    _overlap_coefficient,
+    _table,
+)
 
 
 def _make_overlap_cmap():
@@ -46,7 +56,7 @@ def _measure_intra_bead_distances(
     Returns dict with keys: bins, hist (n_pairs × n_bins), pairs, bead_names.
     """
     if bins_dist is None:
-        bins_dist = np.arange(0, 15, 0.2)
+        bins_dist = _BINS_DIST
 
     if save_npy and not outname:
         raise ValueError("outname must be provided when save_npy=True")
@@ -76,7 +86,7 @@ def _measure_intra_bead_distances(
         for bead in bead_names
     }
 
-    for ts in tqdm(
+    for ts in _progress(
         u.trajectory[start:stop:stride], desc="Measuring intra-bead distances"
     ):
         for resid in resids:
@@ -87,9 +97,8 @@ def _measure_intra_bead_distances(
             for k, d in enumerate(dists):
                 raw_out[k].append(d)
 
-    hists = np.array(
-        [np.histogram(v, bins=bins_dist, density=True)[0] for v in raw_out]
-    )
+    names = [f"{a}-{b}" for a, b in pairs]
+    hists = _density_histograms(raw_out, bins_dist, names, "bins_dist")
 
     results = {"bins": bins_x, "hist": hists, "pairs": pairs, "bead_names": bead_names}
 
@@ -105,7 +114,7 @@ def _compute_overlap_matrix(results_aa, results_cg):
     Compute a symmetric N×N overlap coefficient matrix from AA and CG
     intra-bead distance distributions.
 
-    OC = ∫ min(p_AA, p_CG) dx ≈ sum(min(P, Q)) * bin_width
+    OC = ∫ min(p_AA, p_CG) dx, computed as for the bonded plots.
 
     Valid only when histograms are density=True. Diagonal set to 1.
     Returns dict with keys: matrix, overlaps, pairs, bead_names.
@@ -120,11 +129,9 @@ def _compute_overlap_matrix(results_aa, results_cg):
     pairs = results_aa["pairs"]
     n = len(bead_names)
     bead_idx = {b: i for i, b in enumerate(bead_names)}
-    bin_width = results_aa["bins"][1] - results_aa["bins"][0]
-
     overlaps = np.array(
         [
-            np.sum(np.minimum(h_aa, h_cg)) * bin_width
+            _overlap_coefficient(results_aa["bins"], h_aa, h_cg)
             for h_aa, h_cg in zip(results_aa["hist"], results_cg["hist"])
         ]
     )
@@ -248,9 +255,12 @@ def assess_overlap_matrix(
     vmax=1,
     cell_fontsize=11,
     title="Intra-bead Distance Overlap",
-    plot=True,
-    save_npy=False,
-    outname="",
+    save_npy=None,
+    outfile="overlap_matrix",
+    transparent=True,
+    show=None,
+    verbose=None,
+    print_matrix=False,
 ):
     """
     Assess CG parameterisation quality by comparing intra-bead distance
@@ -283,7 +293,8 @@ def assess_overlap_matrix(
     stride : int, optional
         Frame stride (default: 1).
     bins_dist : array-like or None, optional
-        Bin edges for distance histograms (default: 0–15 Å in 0.2 Å steps).
+        Bin edges for distance histograms (default: 0–50 Å in 0.2 Å steps).
+        A warning names any bead pair with distances outside them.
     vmin : float, optional
         Lower bound for colormap normalisation (default: 0).
     vmax : float, optional
@@ -292,15 +303,30 @@ def assess_overlap_matrix(
         Font size for overlap values inside each cell (default: 11).
     title : str, optional
         Title for the overlap matrix plot.
-    plot : bool, optional
-        If true, plots overlap matrix figure. Otherwise, simply returns the
-        numerical matrix as part of the overlap_results dict.
-    save_npy : bool, optional
-        If True, saves raw and histogram arrays to .npy files.
-    outname : str, optional
-        Prefix for saved files. If provided, the figure is saved as
-        ``{outname}_overlap_matrix.png`` and histogram arrays as
-        ``{outname}_aa/cg_intra_bead_distances_*.npy``.
+    save_npy : str or None, optional
+        If given, a filename prefix: raw distances and histograms are saved
+        as ``{save_npy}_aa/cg_intra_bead_distances_raw/hists.npy``. Default
+        None (not saved).
+    outfile : str or Path or None, optional
+        Where to save the figure: as SVG (`<outfile>.svg`) unless it ends in
+        another image extension, e.g. "overlap.png". Overwritten if it
+        exists; None saves nothing. Default "overlap_matrix".
+    transparent : bool, optional
+        Save with a transparent background. Default True.
+    show : bool or None, optional
+        Whether to display the figure in the notebook. None (default) uses
+        the SHAKER-wide setting (see `set_options`), which is True unless
+        changed. The figure is saved either way.
+    verbose : bool or None, optional
+        Whether to print a short summary: mean OC over all pairs,
+        pair counts per ✓ (OC ≥ 0.80) / ⚠ (≥ 0.65) / ✗, each bead's mean OC
+        (worst first) and up to 5 worst pairs that are not ✓. Printed
+        regardless of `show`. None (default) uses the SHAKER-wide setting
+        (see `set_options`), which is True unless changed.
+    print_matrix : bool, optional
+        With `verbose`, also print the full N×N matrix (with a per-bead mean
+        column) above the summary. Its size grows with N², so it is off by
+        default. Default False.
 
     Returns
     -------
@@ -313,7 +339,7 @@ def assess_overlap_matrix(
     Examples
     --------
     >>> oc, fig, axes = assess_overlap_matrix(u_aa, u_cg, resname='MOL',
-    ...                                       outname='MOL')
+    ...                                       outfile='MOL_overlap.png')
 
     >>> oc, fig, axes = assess_overlap_matrix(u_aa, u_cg, resname='MOL',
     ...                                       bead_names=['BB', 'SC1', 'SC2'])
@@ -332,7 +358,7 @@ def assess_overlap_matrix(
     """
 
     if bins_dist is None:
-        bins_dist = np.arange(0, 15, 0.2)
+        bins_dist = _BINS_DIST
 
     results_aa = _measure_intra_bead_distances(
         u_aa,
@@ -342,8 +368,8 @@ def assess_overlap_matrix(
         stop=stop,
         stride=stride,
         bins_dist=bins_dist,
-        save_npy=save_npy,
-        outname=outname + "_aa" if outname else "",
+        save_npy=save_npy is not None,
+        outname=f"{save_npy}_aa",
     )
     results_cg = _measure_intra_bead_distances(
         u_cg,
@@ -353,18 +379,66 @@ def assess_overlap_matrix(
         stop=stop,
         stride=stride,
         bins_dist=bins_dist,
-        save_npy=save_npy,
-        outname=outname + "_cg" if outname else "",
+        save_npy=save_npy is not None,
+        outname=f"{save_npy}_cg",
     )
     oc = _compute_overlap_matrix(results_aa, results_cg)
 
-    if not plot:
-        return oc, None, None
-    else:
-        fig, axes = _plot_overlap_matrix(
-            oc, vmin=vmin, vmax=vmax, title=title, cell_fontsize=cell_fontsize
-        )
-        if outname:
-            fig.savefig(f"{outname}_overlap_matrix.png", dpi=150)
+    fig, axes = _plot_overlap_matrix(
+        oc, vmin=vmin, vmax=vmax, title=title, cell_fontsize=cell_fontsize
+    )
+    _finish_figure(fig, outfile, transparent, show)
+    if _resolve(verbose, "verbose"):
+        print(_overlap_report(oc, print_matrix))
+    return oc, fig, axes
 
-        return oc, fig, axes
+
+def _overlap_report(overlap_results, print_matrix=False, n_worst=5):
+    """
+    Text summary for `assess_overlap_matrix`; see its `verbose` and
+    `print_matrix`. Self-pairs are excluded from every mean.
+    """
+    names = overlap_results["bead_names"]
+    pairs, overlaps = overlap_results["pairs"], overlap_results["overlaps"]
+    matrix = np.where(np.eye(len(names), dtype=bool), np.nan, overlap_results["matrix"])
+    bead_means = np.nanmean(matrix, axis=1)
+
+    title = "Overlap matrix: CG vs AA intra-bead distances"
+    lines = [f"{title}   {len(names)} beads, {len(pairs)} pairs"]
+    if print_matrix:
+        # OC as ".81" to keep columns narrow; "-" on the diagonal.
+        def cell(v):
+            return "-" if np.isnan(v) else f"{v:.2f}".lstrip("0")
+
+        rows = [("", *names, "mean")]
+        rows += [
+            (a, *(cell(v) for v in matrix[i]), f"{bead_means[i]:.2f}")
+            for i, a in enumerate(names)
+        ]
+        lines += _table(rows, align="<" + ">" * (len(names) + 1))
+
+    count = {m: sum(_oc_status(v) == m for v in overlaps) for m in "✓⚠✗"}
+    lines.append(
+        f"mean OC {np.nanmean(overlaps):.2f}   "
+        f"pairs: {count['✓']} ✓  {count['⚠']} ⚠  {count['✗']} ✗"
+    )
+
+    # Per-bead means, worst first, laid out column by column in 4 columns.
+    order = np.argsort(bead_means)
+    beads = [
+        f"{names[i]:<{max(map(len, names))}}  {bead_means[i]:.2f} {_oc_status(bead_means[i])}"
+        for i in order
+    ]
+    n_rows = -(-len(beads) // 4)
+    lines.append("per bead (mean OC, worst first):")
+    lines += ["  " + "     ".join(beads[r::n_rows]) for r in range(n_rows)]
+
+    # Up to `n_worst` lowest pairs, leaving out those that are ✓ anyway.
+    worst = [k for k in np.argsort(overlaps) if _oc_status(overlaps[k]) != "✓"]
+    listed = "   ".join(
+        f"{'-'.join(pairs[k])} {overlaps[k]:.2f} {_oc_status(overlaps[k])}"
+        for k in worst[:n_worst]
+    )
+    lines += ["worst pairs:", f"  {listed or 'none (all ✓)'}"]
+    lines.append(f"(OC ✓ ≥ {_OC_GOOD:.2f}, ⚠ ≥ {_OC_WARN:.2f}; self-pairs excluded)")
+    return "\n".join(lines)

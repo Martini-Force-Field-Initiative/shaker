@@ -14,6 +14,7 @@ __all__ = [
     "__version__",
     "align_mol_to_single_traj",
     "assess_overlap_matrix",
+    "bead_neighbours",
     "bonded_estimator",
     "dihedral_fitting",
     "estimator",
@@ -26,11 +27,13 @@ __all__ = [
     "mapper",
     "measure_bonded_terms",
     "measurer",
+    "options",
     "overlap",
     "plot",
     "plot_bonded_distributions",
     "plot_sasa_dir",
     "prepare_setup_water",
+    "record_iteration",
     "render",
     "render_2d",
     "render_2dMapping",
@@ -40,6 +43,7 @@ __all__ = [
     "runSim",
     "run_SASA",
     "sasa",
+    "set_options",
     "system_builders",
     "vsites",
     "write_initial_CGitp",
@@ -52,6 +56,7 @@ from . import (
     itp,
     mapper,
     measurer,
+    options,
     overlap,
     plot,
     render,
@@ -62,14 +67,20 @@ from . import (
 )
 from .estimator import bonded_estimator
 from .itp import write_initial_CGitp
-from .mapper import map_aa2cg
+from .mapper import bead_neighbours, map_aa2cg
 from .measurer import measure_bonded_terms
+from .options import set_options
 from .overlap import assess_overlap_matrix
 from .plot import plot_bonded_distributions, plot_sasa_dir
 from .render import render_connely_surface, render_ensemble, render_mapping
 from .render_2d import render_2dMapping
 from .sasa import run_SASA
-from .system_builders import list_iterations, prepare_setup_water, runSim
+from .system_builders import (
+    list_iterations,
+    prepare_setup_water,
+    record_iteration,
+    runSim,
+)
 from .vsites import (
     align_mol_to_single_traj,
     generate_virtual_sites3,

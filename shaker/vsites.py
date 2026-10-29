@@ -6,9 +6,9 @@ import MDAnalysis as md
 import numpy as np
 from MDAnalysis.analysis import align
 from scipy.optimize import lsq_linear
-from tqdm.autonotebook import tqdm
 
 from .helper import _bead_mass_from_type
+from .options import _progress
 
 
 def _atom_label(atom_group, i, output):
@@ -247,7 +247,7 @@ def align_mol_to_single_traj(
     # Reusable mobile universe with same topology as one molecule
     mobile = md.Merge(ref_atoms)
     with md.Writer(output_xtc, n_atoms=len(ref.atoms)) as writer:
-        for ts in tqdm(u.trajectory, desc="Aligning molecules"):
+        for ts in _progress(u.trajectory, desc="Aligning molecules"):
             for res in residues:
                 mobile.atoms.positions = res.atoms.positions.copy()
                 align.alignto(mobile, ref, select=align_selection)
@@ -260,7 +260,7 @@ def align_mol_to_single_traj(
             (len(aligned.trajectory), len(aligned.atoms), 3), dtype=np.float32
         )
 
-        for i, ts in tqdm(
+        for i, ts in _progress(
             enumerate(aligned.trajectory),
             total=len(aligned.trajectory),
             desc="Averaging aligned trajectory",

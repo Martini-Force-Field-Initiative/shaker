@@ -1,0 +1,27 @@
+                      :-) GROMACS - gmx mdrun, 2023.5 (-:
+
+Command line:
+  gmx mdrun -v -deffnm p -pin on -nt 8
+
+Input Parameters:
+   integrator                     = md
+   tinit                          = 0
+   dt                             = 0.02
+   nsteps                         = 10000000
+   init-step                      = 0
+   nstlog                         = 1000000
+
+Started mdrun on rank 0 Mon Sep 28 20:05:20 2026
+
+           Step           Time
+       10000000   200000.00000
+
+Writing checkpoint, step 10000000 at Mon Sep 28 20:14:25 2026
+
+	Statistics over 10000001 steps using 100001 frames
+
+               Core t (s)   Wall t (s)        (%)
+       Time:     4356.346      544.543      800.0
+                 (ns/day)    (hour/ns)
+Performance:    31733.014        0.001
+Finished mdrun on rank 0 Mon Sep 28 20:14:25 2026

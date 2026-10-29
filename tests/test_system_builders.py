@@ -1,10 +1,28 @@
 """Tests for shaker/system_builders.py — iteration checkpointing."""
 
 import json
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
 
+import numpy as np
 import pytest
 
-from shaker.system_builders import _checkpoint, list_iterations
+from shaker.system_builders import (
+    _checkpoint,
+    _run_mdrun,
+    _stage_report,
+    _stage_result,
+    _StageLine,
+    list_iterations,
+    record_iteration,
+)
+
+DATA = Path(__file__).parent / "data"
+FINISHED_LOG = DATA / "prod_finished.log"
 
 
 def _make_cleaned_traj(dir_path, pdb_text="ATOM\n", xtc_text="xtc"):
@@ -139,3 +157,152 @@ class TestCheckpoint:
 
         with pytest.raises(ValueError, match="keep_last must be"):
             _checkpoint(keep_last=bad_value)
+
+
+class TestRunMdrun:
+    """_run_mdrun with a fake mdrun (a python one-liner)."""
+
+    def _fake(self, code):
+        return [sys.executable, "-c", code]
+
+    def test_echoes_output_and_returns(self, capsys):
+        _run_mdrun(self._fake("print('step 100, will finish soon')"))
+        assert "step 100" in capsys.readouterr().out
+
+    def test_nonzero_exit_raises_with_output_tail(self, tmp_path, capsys):
+        code = "import sys; print('bad topology'); sys.exit(1)"
+        with (
+            open(tmp_path / "gmx_run.log", "w") as log,
+            pytest.raises(subprocess.CalledProcessError, match="bad topology"),
+        ):
+            _run_mdrun(self._fake(code), log=log)
+
+        # Quiet: output went to the log, not the cell.
+        assert "bad topology" in (tmp_path / "gmx_run.log").read_text()
+        assert capsys.readouterr().out == ""
+
+    def test_kills_process_stuck_after_fatal_error(self):
+        code = "import time; print('Fatal error:', flush=True); time.sleep(60)"
+        start = time.monotonic()
+        with pytest.raises(RuntimeError, match="fatal error"):
+            _run_mdrun(self._fake(code), fatal_grace=0.5, poll=0.1)
+        assert time.monotonic() - start < 15
+
+    def test_kills_silent_process(self):
+        start = time.monotonic()
+        with pytest.raises(RuntimeError, match="no output"):
+            _run_mdrun(
+                self._fake("import time; time.sleep(60)"), hang_timeout=1, poll=0.1
+            )
+        assert time.monotonic() - start < 15
+
+
+class TestStageLogs:
+    """The m/r/p .log parsing behind runSim's per-stage lines."""
+
+    def test_finished_minimization_and_production(self):
+        m = _stage_report(DATA / "min_finished.log")
+        p = _stage_report(FINISHED_LOG)
+
+        assert m["steps_done"] == 3491 and m["fmax"] == pytest.approx(24.808376)
+        assert p["finished"] and not p["stopped_early"]
+        assert p["steps_done"] == p["nsteps"] == 10000000
+        assert _stage_result(m) == "3491 steps   Fmax 24.8 (target 10)   ✓"
+        assert _stage_result(p) == "200.0/200.0 ns   31733 ns/day   0:09:05   ✓"
+
+    def test_flags_truncated_run_with_lincs_warnings(self, tmp_path):
+        log = FINISHED_LOG.read_text()
+        log = log.replace("Statistics over 10000001", "Statistics over 3000001")
+        log = log.replace(
+            "Writing checkpoint",
+            "Step 0, time 0 (ps)  LINCS WARNING\nWriting checkpoint",
+        )
+        (tmp_path / "p.log").write_text(log)
+
+        result = _stage_result(_stage_report(tmp_path / "p.log"))
+
+        assert result.startswith("60.0/200.0 ns")
+        assert result.endswith("⚠ stopped early · 1 LINCS warnings")
+
+
+def test_stage_line_is_append_only(tmp_path, capsys):
+    shutil.copy(FINISHED_LOG, tmp_path / "p.log")  # nsteps = 10000000
+    line = _StageLine("", tmp_path / "p.log")
+
+    for step in (100, 600000, 2500000, 5000000, 7600000, 9999900):
+        line(f"\rstep {step}, will finish soon")
+    line.finish("RESULT")
+
+    out = capsys.readouterr().out
+    assert re.match(r"ETA \d\d:\d\d \(.+\) · 25 · 50 · 75 +RESULT\n$", out)
+    assert out.index("RESULT") == _StageLine.WIDTH
+
+
+class TestRecordIteration:
+    def _bonded(self, mu):
+        x = np.arange(0.1, 50, 0.2)
+        h = np.exp(-0.5 * ((x - mu) / 0.1) ** 2)
+        h /= h.sum() * 0.2  # density, like measure_bonded_terms
+        empty = {"targets": [], "bins": x, "hist": np.empty((0, x.size))}
+        return {
+            "distances": {"targets": [["A", "B"]], "bins": x, "hist": h[None]},
+            "angles": empty,
+            "dihedrals": empty,
+        }
+
+    def test_writes_latest_and_prints_history(self, tmp_path, capsys):
+        (tmp_path / "iter_0_20260101_000000").mkdir()
+        latest = tmp_path / "iter_1_20260101_000100"
+        latest.mkdir()
+
+        path = record_iteration(
+            tmp_path,
+            note="bond A-B tweak",
+            overlap={"overlaps": np.array([0.8, 0.6])},
+            bonded=(self._bonded(2.2), self._bonded(2.2)),
+            sasa=[("AA", 5.0, 0.1), ("CG_Simulated", 4.8, 0.1)],
+        )
+
+        assert path == latest / "metrics.json"
+        m = json.loads(path.read_text())
+        assert m["overlap_mean_oc"] == pytest.approx(0.7)
+        assert m["bonded"]["✓"] == 1 and m["sasa_pct"] == pytest.approx(96.0)
+        rows = capsys.readouterr().out.splitlines()
+        assert rows[1].split() == ["0", "–", "–", "–", "–", "–"]
+        assert rows[2].split() == [
+            "1",
+            "96.0",
+            "✓",
+            "0.70",
+            "1",
+            "0",
+            "0",
+            "bond",
+            "A-B",
+            "tweak",
+        ]
+
+    def test_no_iterations_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="run runSim first"):
+            record_iteration(tmp_path)
+
+
+def test_runsim_status_file(monkeypatch):
+    import shaker.system_builders as sb
+
+    def mdrun_failing_in_prod(cmd, **kwargs):
+        if cmd[4] == "p":  # -deffnm p
+            raise RuntimeError("mdrun hung (no output for 600 s) and was killed.\nmore")
+
+    monkeypatch.setattr(sb, "_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(sb, "_run_mdrun", mdrun_failing_in_prod)
+    with pytest.raises(RuntimeError):
+        sb.runSim(cleanTraj=False, verbose=False)
+    status = Path("runSim.status").read_text().splitlines()
+    assert status[0].startswith("runSim · failed prod")
+    assert status[0].endswith("mdrun hung (no output for 600 s) and was killed.")
+    assert [line.split()[0] for line in status[1:]] == ["min", "rel"]
+
+    monkeypatch.setattr(sb, "_run_mdrun", lambda *args, **kwargs: None)
+    sb.runSim(cleanTraj=False, verbose=False)
+    assert Path("runSim.status").read_text().startswith("runSim · done")

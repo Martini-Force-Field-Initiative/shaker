@@ -7,6 +7,9 @@ from math import factorial
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .options import _resolve
+from .plot import _finish_figure
+
 
 ###
 ### Helpers
@@ -247,7 +250,9 @@ def fit_dihedral_workflow(
     weight_mode="boltzmann",
     weights=None,
     w_temp_kj=2.5,
-    plot=False,
+    outfile="dihedral_fit",
+    transparent=True,
+    show=False,
 ):
     """
     Full dihedral fitting workflow: inverted Boltzmann → smooth → fit → report.
@@ -282,8 +287,19 @@ def fit_dihedral_workflow(
         Custom per-point weights. Overrides weight_mode.
     w_temp_kj : float
         Effective temperature for Boltzmann weighting. Default 2.5.
-    plot : bool
-        If True, plot raw potential, smoothed potential and fit. Default False.
+    outfile : str or Path or None, optional
+        Where to save a figure of the raw potential, smoothed potential and
+        fit: as SVG unless it ends in another image extension (e.g. ".png"),
+        with the dihedral appended when `tgt` is given, e.g.
+        `dihedral_fit_B1-B2-B3-B4.svg`. Overwritten if it exists; None saves
+        nothing. Default "dihedral_fit".
+    transparent : bool, optional
+        Save with a transparent background. Default True.
+    show : bool or None, optional
+        Display that figure in the notebook and print the fitted terms.
+        Default False: the fit is an opt-in diagnostic. None uses the
+        SHAKER-wide setting (see `set_options`). The terms are always in
+        the returned "report".
 
     Returns
     -------
@@ -314,7 +330,7 @@ def fit_dihedral_workflow(
         model, bins=bins, energy_kj=smooth_potential, return_pots=True
     )
 
-    if plot:
+    if outfile is not None or _resolve(show, "show"):
         fit_data = evaluate_model(bins, model)
         title = "-".join(tgt) if tgt is not None else "Dihedral fit"
         fig, ax = plt.subplots(1, 1, figsize=(6, 3))
@@ -327,11 +343,12 @@ def fit_dihedral_workflow(
         ax.set_xlabel("Dihedral angle (°)", fontweight="bold")
         ax.set_xlim(-180, 180)
         fig.tight_layout()
-        plt.show()
-
-        ## Also print the potential
-        for line in model["report"]:
-            print(line)
+        tag = "-".join(tgt) if tgt is not None else None
+        if _finish_figure(fig, outfile, transparent, show, tag=tag):
+            plt.show()
+            ## Also print the potential
+            for line in model["report"]:
+                print(line)
 
     return model
 
