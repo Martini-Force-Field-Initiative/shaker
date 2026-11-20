@@ -4,7 +4,13 @@ import warnings
 
 import numpy as np
 
-from .helper import _BINS_ANGL, _BINS_DIHED, _BINS_DIST, _density_histograms
+from .helper import (
+    _BINS_ANGL,
+    _BINS_DIHED,
+    _BINS_DIST,
+    _check_bins,
+    _density_histograms,
+)
 from .options import _progress
 
 warnings.filterwarnings(
@@ -101,9 +107,11 @@ def measure_bonded_terms(
       ``u.trajectory[start:stop:stride]``.
     """
 
-    bins_dist = _BINS_DIST if bins_dist is None else np.asarray(bins_dist)
-    bins_angl = _BINS_ANGL if bins_angl is None else np.asarray(bins_angl)
-    bins_dihed = _BINS_DIHED if bins_dihed is None else np.asarray(bins_dihed)
+    bins_dist = _check_bins(_BINS_DIST if bins_dist is None else bins_dist, "bins_dist")
+    bins_angl = _check_bins(_BINS_ANGL if bins_angl is None else bins_angl, "bins_angl")
+    bins_dihed = _check_bins(
+        _BINS_DIHED if bins_dihed is None else bins_dihed, "bins_dihed", span=360
+    )
 
     bins_dist_x = (bins_dist[1:] + bins_dist[:-1]) / 2
     bins_angl_x = (bins_angl[1:] + bins_angl[:-1]) / 2

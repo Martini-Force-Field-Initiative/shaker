@@ -6,7 +6,7 @@ import numpy as np
 from matplotlib import gridspec, ticker
 from MDAnalysis.analysis.distances import self_distance_array
 
-from .helper import _BINS_DIST, _density_histograms
+from .helper import _BINS_DIST, _check_bins, _density_histograms
 from .options import _progress, _resolve
 from .plot import (
     _OC_GOOD,
@@ -55,8 +55,7 @@ def _measure_intra_bead_distances(
     If bead_names is None, all beads in the first residue of resname are used.
     Returns dict with keys: bins, hist (n_pairs × n_bins), pairs, bead_names.
     """
-    if bins_dist is None:
-        bins_dist = _BINS_DIST
+    bins_dist = _check_bins(_BINS_DIST if bins_dist is None else bins_dist, "bins_dist")
 
     if save_npy and not outname:
         raise ValueError("outname must be provided when save_npy=True")

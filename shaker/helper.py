@@ -25,6 +25,26 @@ _BINS_ANGL = np.linspace(0, 180, 91)  # 2°
 _BINS_DIHED = np.linspace(-180, 180, 181)  # 2°, the full circle once
 
 
+def _check_bins(edges, arg, span=None):
+    """
+    Bin edges as an array, raising ValueError unless they are increasing and
+    evenly spaced (and, if `span` is given, cover exactly `span`). The overlap
+    coefficient and the circular Wasserstein distance assume one bin width.
+    """
+    edges = np.asarray(edges, float)
+    if edges.ndim != 1 or edges.size < 2:
+        raise ValueError(f"{arg} must be a 1-D array of at least 2 bin edges.")
+    widths = np.diff(edges)
+    if widths[0] <= 0 or not np.allclose(widths, widths[0], rtol=1e-6, atol=0):
+        raise ValueError(f"{arg} must be increasing and evenly spaced.")
+    if span is not None and not np.isclose(edges[-1] - edges[0], span):
+        raise ValueError(
+            f"{arg} must cover exactly {span:g}° (e.g. -180 to 180); "
+            f"got {edges[0]:g} to {edges[-1]:g}."
+        )
+    return edges
+
+
 def _density_histograms(values, edges, names, arg):
     """
     One `density=True` histogram per list in `values`, warning when values

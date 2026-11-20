@@ -16,12 +16,6 @@ from .options import _resolve
 
 mpl.rcParams["figure.dpi"] = 150
 
-# NumPy 2.0 renamed trapz -> trapezoid
-try:
-    _trapz = np.trapezoid
-except AttributeError:
-    _trapz = np.trapz  # type: ignore[attr-defined]
-
 # SASA deviation from AA: ✓ / green band up to _SASA_OK, ⚠ / orange up to
 # _SASA_WARN, ✗ / red beyond (fractions of the AA value). The SASA axis spans
 # at least ±_SASA_WARN around the reference.
@@ -763,9 +757,13 @@ def _distance_xlim(bins, hists, default=(1.5, 5.5), width=4.0, frac=0.01):
 
 
 def _overlap_coefficient(bins, p, q):
-    """∫ min(p, q) dx for two densities at the same bin centres (NaN → 0)."""
+    """
+    ∫ min(p, q) dx for two densities at the same (uniformly spaced) bin
+    centres (NaN → 0). Each bin counts over its full width, so the end bins
+    are not halved as they would be by the trapezoidal rule.
+    """
     p, q = np.nan_to_num(np.asarray(p, float)), np.nan_to_num(np.asarray(q, float))
-    return float(_trapz(np.minimum(p, q), bins))
+    return float(np.sum(np.minimum(p, q)) * np.mean(np.diff(bins)))
 
 
 def _distribution_metrics(ref_bins, ref_hist, bins, hist, periodic=False):
