@@ -102,7 +102,7 @@ def plot_sasa_dir(
     kind : {"violin", "overlay"}, optional
         Chart style, see above. Default is "violin".
     outfile : str or Path or None, optional
-        Where to save the figure: as SVG (`<outfile>.svg`) unless it ends in
+        Name or path of where to save the figure as an SVG: (`<outfile>.svg`) unless it ends in
         another image extension, e.g. "sasa.png". Overwritten if it exists;
         None saves nothing. Default "SASABar".
     transparent : bool, optional
@@ -442,11 +442,11 @@ def plot_bonded_distributions(
 
     colors : list of str or None, optional
         Line colors for each bonded dictionary. If None (or for None entries),
-        the default palette is used: tab:blue, tab:red, tab:grey, then the
-        other tab: colours.
+        the default palette is used: tab:blue, tab:red, tab:grey, etc.
+        As defined in _COLORS.
 
     outfile : str or Path or None, optional
-        Where to save the figure: as SVG (`<outfile>.svg`) unless it ends in
+        Name or path of where to save the figure as an SVG: (`<outfile>.svg`) unless it ends in
         another image extension, e.g. "bonds.png". Overwritten if it exists;
         None saves nothing. Default "cleanbonds".
 
@@ -470,21 +470,26 @@ def plot_bonded_distributions(
     verbose : bool or None, optional
         Whether to print (with at least two datasets) a text report against
         the reference (first) dataset. The second dataset (e.g. CG) gets a
-        table, one line per term under category headings: mean ± sd of
-        both, Δ mean, OC and W (the same numbers as on the plot), marked ✓
-        (OC ≥ 0.80), ⚠ (≥ 0.65) or ✗, plus "mean-off" when |Δ| is larger
-        than the reference's sd, and hints about the reference distribution
-        (multimodal, flat, planar on terms that are not ✓; near-linear angles
-        always); then a count line. Each further dataset
-        (e.g. Prev. CG) gets only its count line and the terms whose mark
-        differs from the second dataset's. Units are Å for distances and
-        degrees for angles and dihedrals. Printed regardless of `show`.
+        report table with one line per term of the categories: mean ± sd of
+        both, Δ mean, overlap coefficient (OC), and Wasserstein distance (W),
+        marked ✓ (OC ≥ 0.80), ⚠ (≥ 0.65) or ✗, and the count.
+
+        “Mean-off” flags a term when its mean differs from the reference by
+        more than the reference's standard deviation, and hints about the
+        reference distribution (see :func:`_term_hints`).
+
+        Each further dataset (e.g. Prev. CG) gets only its count line
+        and the terms whose mark differs from the second dataset's.
+
+        Units are Å for distances and degrees for angles and dihedrals.
+        Printed regardless of the value of `show`.
         None (default) uses the SHAKER-wide setting (see `set_options`),
         which is True unless changed.
 
     only_flagged : bool, optional
-        With `verbose`, list only the terms that are not ✓ or are mean-off in
-        the table (count lines and further datasets are always printed).
+        With `verbose`, include in the first comparison table only terms that
+        are not ✓, are "mean-off", or have a reference-distribution hint.
+        Count lines and further-dataset comparisons are always printed.
         Default False.
 
     Returns

@@ -114,7 +114,8 @@ def _compute_overlap_matrix(results_aa, results_cg):
     Compute a symmetric N×N overlap coefficient matrix from AA and CG
     intra-bead distance distributions.
 
-    OC = ∫ min(p_AA, p_CG) dx, computed as for the bonded plots.
+    The overlap coefficient (OC) is ∫ min(p_AA, p_CG) dx, computed in the
+    same way as for the bonded plots.
 
     Valid only when histograms are density=True. Diagonal set to 1.
     Returns dict with keys: matrix, overlaps, pairs, bead_names.
@@ -308,7 +309,7 @@ def assess_overlap_matrix(
         as ``{save_npy}_aa/cg_intra_bead_distances_raw/hists.npy``. Default
         None (not saved).
     outfile : str or Path or None, optional
-        Where to save the figure: as SVG (`<outfile>.svg`) unless it ends in
+        Name or path of where to save the figure as an SVG: (`<outfile>.svg`) unless it ends in
         another image extension, e.g. "overlap.png". Overwritten if it
         exists; None saves nothing. Default "overlap_matrix".
     transparent : bool, optional

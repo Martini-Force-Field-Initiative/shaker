@@ -288,8 +288,8 @@ def fit_dihedral_workflow(
     w_temp_kj : float
         Effective temperature for Boltzmann weighting. Default 2.5.
     outfile : str or Path or None, optional
-        Where to save a figure of the raw potential, smoothed potential and
-        fit: as SVG unless it ends in another image extension (e.g. ".png"),
+        Name or path of where to save the figure of the raw potential, smoothed potential and
+        fit as an SVG unless it ends in another image extension (e.g. ".png"),
         with the dihedral appended when `tgt` is given, e.g.
         `dihedral_fit_B1-B2-B3-B4.svg`. Overwritten if it exists; None saves
         nothing. Default "dihedral_fit".
