@@ -5,6 +5,9 @@ Uses minimal GRO + XTC files written to a tmp_path fixture (see conftest.py).
 Positions are in nm in the GRO file; MDAnalysis exposes them in Å internally.
 """
 
+import warnings
+from pathlib import Path
+
 import MDAnalysis as mda
 import pytest
 
@@ -17,7 +20,7 @@ pytestmark = [
     ),
 ]
 
-from shaker.mapper import map_aa2cg
+from shaker.mapper import bead_neighbours, map_aa2cg
 
 # ---------------------------------------------------------------------------
 # Mapping definitions reused across tests
@@ -140,6 +143,47 @@ class TestTopology:
         )
         cg = mda.Universe(str(tmp_path / "out.gro"))
         assert len(cg.atoms) == 2
+
+
+# ---------------------------------------------------------------------------
+# Bead neighbour detection
+# ---------------------------------------------------------------------------
+
+
+class TestBeadNeighbours:
+    def test_warns_for_atom_names_absent_from_structure(self, two_atom_gro_xtc):
+        gro, _ = two_atom_gro_xtc
+        gro_path = Path(gro)
+        gro_path.write_text(gro_path.read_text().replace("0.300", "0.150"))
+        mapping = {
+            "MOL": {
+                "B1": {"type": "SC3", "atoms": ["C1", "C99"]},
+                "B2": {"type": "SC3", "atoms": ["C2", "C98", "C99"]},
+                "B3": {"type": "SC3", "atoms": ["C97"]},
+            }
+        }
+
+        with pytest.warns(UserWarning, match="Atom names in the mapping") as recorded:
+            result = bead_neighbours(gro, mapping, "MOL", verbose=False)
+
+        assert len(recorded) == 1
+        message = str(recorded[0].message)
+        assert "residue 'MOL'" in message
+        assert "bead 'B1': C99" in message
+        assert "bead 'B2': C98, C99" in message
+        assert "bead 'B3': C97" in message
+        assert result == {"B1": ["B2"], "B2": ["B1"], "B3": []}
+
+    def test_no_missing_atom_warning_for_complete_mapping(self, two_atom_gro_xtc):
+        gro, _ = two_atom_gro_xtc
+        with warnings.catch_warnings(record=True) as recorded:
+            warnings.simplefilter("always")
+            bead_neighbours(gro, TWO_BEADS, "MOL", verbose=False)
+
+        assert not any(
+            "Atom names in the mapping are absent" in str(warning.message)
+            for warning in recorded
+        )
 
 
 # ---------------------------------------------------------------------------

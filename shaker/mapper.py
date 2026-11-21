@@ -322,6 +322,12 @@ def bead_neighbours(structure, mapping, resname, verbose=None):
     dict
         ``{bead: [neighbouring beads]}``, in mapping order.
 
+    Warns
+    -----
+    UserWarning
+        If mapped atom names are absent from the first matching residue. The
+        warning identifies the affected beads; those atoms are ignored.
+
     Raises
     ------
     ValueError
@@ -349,11 +355,27 @@ def bead_neighbours(structure, mapping, resname, verbose=None):
 
     # Beads each atom belongs to (by atom name), and atom-atom bonds.
     names = list(atoms.names)
+    atom_names = set(names)
+    missing_by_bead = {}
     atom_beads = [set() for _ in names]
     for bead, info in beads.items():
+        missing = sorted(set(info["atoms"]) - atom_names)
+        if missing:
+            missing_by_bead[bead] = missing
         for name in info["atoms"]:
-            if name in names:
+            if name in atom_names:
                 atom_beads[names.index(name)].add(bead)
+    if missing_by_bead:
+        details = "; ".join(
+            f"bead '{bead}': {', '.join(missing)}"
+            for bead, missing in missing_by_bead.items()
+        )
+        warnings.warn(
+            f"Atom names in the mapping are absent from residue '{resname}' "
+            f"in {structure}: {details}",
+            UserWarning,
+            stacklevel=2,
+        )
     local = {a.index: k for k, a in enumerate(atoms)}
     bonded = [set() for _ in names]
     for a, b in atoms.bonds.indices:
