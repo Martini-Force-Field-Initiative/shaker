@@ -1,21 +1,32 @@
 """GROMACS simulation setup and execution."""
 
+import contextlib
 import glob
 import json
 import os
 import re
+import select
 import shlex
 import shutil
+import signal
 import subprocess
+import sys
+import time
 import warnings
-from datetime import datetime
+from datetime import timedelta
 from importlib.resources import files
 from pathlib import Path
 
 import MDAnalysis as md
 import numpy as np
 
+from .options import _resolve
+from .plot import _SASA_OK, _SASA_WARN, _bonded_summary, _table
+
 _ITER_RE = re.compile(r"^iter_(\d+)_\d{8}_\d{6}$")
+# runSim stage prefixes (-deffnm) and their display names.
+_STAGES = {"m": "min", "r": "rel", "p": "prod"}
+_EM_INTEGRATORS = ("steep", "cg", "l-bfgs")
 
 
 def prepare_setup_water(
@@ -57,8 +68,13 @@ def prepare_setup_water(
         Martini solvent ITP file. If None, the SHAKER-distributed default is used.
     IonsITP : str or Path, optional
         Martini ions ITP file. If None, the SHAKER-distributed default is used.
+    resname : str, optional
+        Residue name of the solute, used in the `[ molecules ]` section of
+        `topol.top`. If None, it is read from `initial_structure`.
     NaCL_Conc : float, optional
-        Target NaCl concentration (mol/L). Default is 0.15.
+        Target NaCl concentration (mol/L). Default is 0.15. Converted to a
+        number of Na+/Cl- pairs from the water in the box: each Martini W
+        bead stands for 4 water molecules, and pure water is 55.5 M.
     gmx_loc : str, optional
         Prefix/path to the GROMACS executable (e.g. "/usr/local/bin/" or "").
 
@@ -72,7 +88,8 @@ def prepare_setup_water(
     4. Neutralize the system with counterions using ``gmx genion``.
     5. Add additional NaCl to reach the target concentration.
 
-    All GROMACS stdout/stderr are appended to `gmx_setup_water.log`.
+    All GROMACS output from these steps is written to `gmx_setup_water.log`,
+    which is overwritten on each call.
     """
 
     ## normalize paths
@@ -205,6 +222,8 @@ def prepare_setup_water(
             )
             u_mem = md.Universe("memion.gro")
         Waternumber = len(u_mem.select_atoms("resname W").residues)
+        # Ion pairs for the target concentration: W beads × 4 waters each,
+        # scaled by NaCl molarity relative to pure water (55.5 M).
         naclNUM = int((NaCL_Conc * Waternumber * 4) / 55.5)
 
         _run(
@@ -268,6 +287,9 @@ def runSim(
     cleanOldRun=True,
     mapping=None,
     keep_last=-1,
+    hang_timeout=600,
+    stream_gmx=False,
+    verbose=None,
 ):
     """
     Run a standard Martini simulation pipeline (minimization → relaxation → production).
@@ -281,15 +303,19 @@ def runSim(
         If None, the defaults distributed with SHAKER are used.
     minOPT, relOPT, prodOPT : str, optional
         Extra command-line arguments passed to `gmx mdrun` for each stage
-        (e.g. "-pin on -nt 8").
+        (e.g. "-pin on -nt 8"). GROMACS's own wall-time cap, `-maxh`, can
+        be passed here too.
     maxwarn : int, optional
         Value passed to `gmx grompp -maxwarn`. Default is 1.
     gmx_loc : str, optional
         Prefix/path to the GROMACS executable (e.g. "/usr/local/bin/" or "").
     cleanTraj : bool, optional
-        If True, post-process the production trajectory using `_traj_cleanup`.
+        If True (default), strip water and ions from the production
+        trajectory and make molecules whole, writing `pbc.xtc` and a
+        first-frame `pbc.pdb`. Needed for checkpointing (`keep_last`).
     cleanOldRun : bool, optional
-        If True, remove files from previous runs using `_clean_old_files()`.
+        If True (default), first delete the outputs of a previous run in this
+        folder: m/r/p files, `pbc.*`, and `step*`/`crash*` files.
     mapping : dict, optional
         SHAKER mapping dictionary for the simulated molecule. If provided
         (and checkpointing is enabled via `keep_last`), saved as
@@ -305,6 +331,20 @@ def runSim(
           recent iterations, pruning older ones.
 
         Use `list_iterations` to inspect saved iterations.
+    hang_timeout : float or None, optional
+        Seconds without any `mdrun` output after which the run is treated
+        as hung, killed, and a RuntimeError raised. Default is 600. None
+        disables this check. Independently, an `mdrun` that prints a fatal
+        error but does not exit is always killed after a short grace period.
+    stream_gmx : bool, optional
+        If False (default), GROMACS output goes to `gmx_run.log`; a failing
+        command raises with its last lines of output. If True, stream the
+        full GROMACS output into the cell/terminal instead.
+    verbose : bool or None, optional
+        Whether to print one line per stage (see Notes): progress while it
+        runs (only when not streaming GROMACS output), then its result.
+        None (default) uses the SHAKER-wide setting (see `set_options`),
+        which is True unless changed.
 
     Notes
     -----
@@ -317,6 +357,34 @@ def runSim(
 
     Output files use the prefixes `m`, `r`, and `p` corresponding to
     minimization, relaxation, and production stages.
+
+    By default (`verbose` on, `stream_gmx=False`), the printed output is one
+    line per stage, e.g.::
+
+        runSim · output → gmx_run.log
+          min    3491 steps   Fmax 24.8 (target 10)   ✓
+          rel    ETA 20:05 (~1 min) · 25 · 50 · 75        10.0/10.0 ns   16304 ns/day   0:00:53   ✓
+          prod   ETA 20:14 (~9 min) · 25 · 50 · 75        200.0/200.0 ns   31733 ns/day   0:09:05   ✓
+
+    Each line is written as the stage runs and never rewritten: for rel and
+    prod, an ETA once ~5% is done, then milestones at 25/50/75%; when the
+    stage ends, its result is appended, read from the stage's .log:
+
+    - min: steps taken and the final max force vs. `emtol`. Stopping above
+      the target at machine precision is normal for Martini.
+    - rel/prod: simulated vs. planned time, ns/day and wall time.
+    - ✓, or ⚠ followed by the problems found: `did not finish`,
+      `stopped early` (fewer steps than planned, e.g. `-maxh`),
+      `N LINCS warnings`.
+
+    If a stage fails, its line ends with `✗ failed` and the error shows the
+    last lines of GROMACS output.
+
+    The run folder also gets `runSim.status`, for watching a run from outside
+    the notebook: its first line is `runSim · running <stage>`, then
+    `runSim · done` (with the new iteration folder) or `runSim · failed
+    <stage>` (with a short reason), each with a timestamp; below it, the
+    result line of every finished stage, as above.
     """
 
     if minMDP is None:
@@ -333,69 +401,99 @@ def runSim(
     env = os.environ.copy()
     env["GMX_MAXBACKUP"] = "-1"
 
-    ### Minimize the system
-    _run(
-        [
-            gmx,
-            "grompp",
-            "-f",
-            str(minMDP),
-            "-c",
-            "memion_2.gro",
-            "-p",
-            "topol.top",
-            "-o",
-            "m.tpr",
-            "-maxwarn",
-            str(maxwarn),
-        ],
-        env=env,
+    # (prefix, mdp, input coordinates, mdrun options); _STAGES names them.
+    stages = (
+        ("m", minMDP, "memion_2.gro", minOPT),  # minimize
+        ("r", relMDP, "m.gro", relOPT),  # relax
+        ("p", prodMDP, "r.gro", prodOPT),  # production
     )
-    _run([gmx, "mdrun", "-v", "-deffnm", "m", *shlex.split(minOPT)], env=env)
+    verbose = _resolve(verbose, "verbose")
+    if verbose and not stream_gmx:
+        print("runSim · output → gmx_run.log")
+    # runSim.status in the run folder tells watchers (e.g. agents that can't
+    # see the cell) where the run is: "running <stage>", then "done" or
+    # "failed <stage>" (with the reason), followed by the finished stages.
+    finished, stage, iter_dir = [], "setup", None
+    try:
+        with contextlib.ExitStack() as stack:
+            # Not streaming: all gmx output goes to gmx_run.log; errors still
+            # show its tail.
+            log = None if stream_gmx else stack.enter_context(open("gmx_run.log", "w"))
+            for prefix, mdp, coords, opt in stages:
+                stage = _STAGES[prefix]
+                _write_status(f"running {stage}", finished)
+                label = f"  {stage:<6} "
+                # The stage's line starts now and grows while it runs (unless gmx
+                # output is streamed, which shows progress itself). Minimization
+                # gets no % (it usually stops well before nsteps).
+                line = None
+                if verbose and not stream_gmx:
+                    line = _StageLine(label, None if prefix == "m" else f"{prefix}.log")
+                try:
+                    _run(
+                        [
+                            gmx,
+                            "grompp",
+                            "-f",
+                            str(mdp),
+                            "-c",
+                            coords,
+                            "-p",
+                            "topol.top",
+                            "-o",
+                            f"{prefix}.tpr",
+                            "-maxwarn",
+                            str(maxwarn),
+                        ],
+                        log=log,
+                        env=env,
+                    )
+                    _run_mdrun(
+                        [gmx, "mdrun", "-v", "-deffnm", prefix, *shlex.split(opt)],
+                        log=log,
+                        env=env,
+                        hang_timeout=hang_timeout,
+                        on_output=line,
+                    )
+                except BaseException:
+                    if line is not None:  # end the line, so the error starts on its own
+                        line.finish("✗ failed")
+                    raise
+                # Result, e.g. so a -maxh-truncated production doesn't go unnoticed.
+                result = _stage_result(_stage_report(f"{prefix}.log"))
+                finished.append(label + result + "\n")
+                if line is not None:
+                    line.finish(result)
+                elif verbose:  # streaming: after mdrun's own output
+                    print(label + result)
 
-    ### Relax the system
-    _run(
-        [
-            gmx,
-            "grompp",
-            "-f",
-            str(relMDP),
-            "-c",
-            "m.gro",
-            "-p",
-            "topol.top",
-            "-o",
-            "r.tpr",
-            "-maxwarn",
-            str(maxwarn),
-        ],
-        env=env,
-    )
-    _run([gmx, "mdrun", "-v", "-deffnm", "r", *shlex.split(relOPT)], env=env)
+        if cleanTraj:
+            stage = "cleanup"
+            _write_status("running cleanup", finished)
+            _traj_cleanup("p.gro", "p.xtc", "p.tpr", gmx_loc=gmx_loc)
+            iter_dir = _checkpoint(mapping=mapping, keep_last=keep_last)
+    except BaseException as err:
+        _write_status(f"failed {stage}", finished, _failure_reason(err))
+        raise
+    _write_status("done", finished, f"→ {iter_dir.name}" if iter_dir else "")
 
-    ### Production Sim
-    _run(
-        [
-            gmx,
-            "grompp",
-            "-f",
-            str(prodMDP),
-            "-c",
-            "r.gro",
-            "-p",
-            "topol.top",
-            "-o",
-            "p.tpr",
-            "-maxwarn",
-            str(maxwarn),
-        ],
-        env=env,
-    )
-    _run([gmx, "mdrun", "-v", "-deffnm", "p", *shlex.split(prodOPT)], env=env)
 
-    if cleanTraj:
-        _traj_cleanup("p.gro", "p.xtc", "p.tpr")
-        _checkpoint(mapping=mapping, keep_last=keep_last)
+def _write_status(state, finished, detail=""):
+    """
+    Write runSim.status: one status line (state, timestamp, detail), then the
+    result lines of the stages finished so far, as printed in the cell.
+    """
+    line = f"runSim · {state}   {time.strftime('%Y-%m-%d %H:%M:%S')}   {detail}"
+    Path("runSim.status").write_text(line.rstrip() + "\n" + "".join(finished))
+
+
+def _failure_reason(err):
+    """Short reason for the status file; the full error is raised as usual."""
+    if isinstance(err, KeyboardInterrupt):
+        return "interrupted"
+    if isinstance(err, subprocess.CalledProcessError):
+        return f"gmx exit status {err.returncode}"
+    return (str(err).splitlines() or [type(err).__name__])[0]
 
 
 def list_iterations(run_dir):
@@ -435,27 +533,473 @@ def list_iterations(run_dir):
     return [path for _, path in found]
 
 
+def record_iteration(
+    run_dir,
+    note="",
+    overlap=None,
+    bonded=None,
+    sasa=None,
+    sasa_name="CG_Simulated",
+    reference="AA",
+    iteration=None,
+    verbose=None,
+):
+    """
+    Record how an iteration scored, and print the history of all iterations.
+
+    Call it after analysing the latest `runSim`, with the results the
+    notebook already holds; nothing is re-measured. The numbers are written
+    to `metrics.json` in that iteration's `iter_*` folder (overwritten if
+    recorded again), so they are pruned together with it by `keep_last`.
+
+    Parameters
+    ----------
+    run_dir : str or Path
+        Directory `runSim` was executed in (e.g. the tutorials' `CG_WAT`).
+    note : str, optional
+        What changed in this iteration, e.g. "WR5-WR7 r0 0.472 -> 0.480".
+    overlap : dict, optional
+        The overlap results returned by `assess_overlap_matrix`; their mean
+        OC over all bead pairs is recorded.
+    bonded : tuple of dict, optional
+        `(reference, cg)` dicts from `measure_bonded_terms`, measured with
+        the same targets and bins; the counts of terms marked ✓ / ⚠ / ✗ (as
+        in `plot_bonded_distributions`' report) are recorded.
+    sasa : list of tuple, optional
+        The `items` returned by `plot_sasa_dir`; the SASA of `sasa_name` is
+        recorded as a percentage of `reference`'s.
+    sasa_name : str, optional
+        SASA entry for this iteration's CG simulation. Default
+        "CG_Simulated", as in the tutorial.
+    reference : str, optional
+        SASA entry to compare against. Default "AA".
+    iteration : int, optional
+        Index of the iteration to record (the N in `iter_N_*`). Default: the
+        latest one, i.e. the run `runSim` just checkpointed.
+    verbose : bool or None, optional
+        Whether to print the history table: one row per iteration with SASA
+        %, mean overlap OC, bonded ✓ / ⚠ / ✗ counts and the note ("–" where
+        nothing was recorded). None (default) uses the SHAKER-wide setting
+        (see `set_options`), which is True unless changed.
+
+    Returns
+    -------
+    Path
+        The `metrics.json` file written.
+    """
+    run_dir = Path(run_dir)
+    iterations = list_iterations(run_dir)
+    if not iterations:
+        raise ValueError(
+            f"No iter_* folders in {run_dir}: run runSim first (with keep_last "
+            "not None) so there is an iteration to record."
+        )
+    if iteration is None:
+        target = iterations[-1]
+    else:
+        matches = [p for p in iterations if _iteration_index(p) == int(iteration)]
+        if not matches:
+            raise ValueError(f"No iteration {iteration} in {run_dir}.")
+        target = matches[0]
+
+    metrics = {"note": note, "recorded": time.strftime("%Y-%m-%d %H:%M:%S")}
+    if overlap is not None:
+        metrics["overlap_mean_oc"] = float(np.nanmean(overlap["overlaps"]))
+    if bonded is not None:
+        ref, cg = bonded
+        for cat in ("distances", "angles", "dihedrals"):
+            if ref[cat]["targets"] and not np.array_equal(
+                ref[cat]["bins"], cg[cat]["bins"]
+            ):
+                raise ValueError(f"'{cat}' bins differ between the two bonded dicts.")
+        summary = _bonded_summary(ref, cg)
+        metrics["bonded"] = {m: sum(t["status"] == m for t in summary) for m in "✓⚠✗"}
+        metrics["bonded"]["mean_off"] = sum(t["mean_off"] for t in summary)
+    if sasa is not None:
+        means = {name: mean for name, mean, _ in sasa}
+        if sasa_name in means and reference in means:
+            metrics["sasa_pct"] = 100 * means[sasa_name] / means[reference]
+            metrics["sasa_reference"] = reference
+        else:
+            warnings.warn(
+                f"SASA entries '{sasa_name}' and '{reference}' not both found; "
+                "SASA not recorded."
+            )
+
+    path = target / "metrics.json"
+    path.write_text(json.dumps(metrics, indent=2, ensure_ascii=False))
+
+    if _resolve(verbose, "verbose"):
+        print(_iteration_table(run_dir))
+    return path
+
+
+def _iteration_index(iter_dir):
+    """N from an `iter_N_<timestamp>` folder."""
+    return int(_ITER_RE.match(Path(iter_dir).name).group(1))
+
+
+def _iteration_table(run_dir):
+    """History table for `record_iteration`, one row per iteration."""
+    rows = [("iter", "SASA %", "overlap", "bonded ✓", "⚠", "✗", "note")]
+    for iter_dir in list_iterations(run_dir):
+        path = iter_dir / "metrics.json"
+        m = json.loads(path.read_text()) if path.is_file() else {}
+        sasa, oc, bonded = m.get("sasa_pct"), m.get("overlap_mean_oc"), m.get("bonded")
+        if sasa is None:
+            sasa_cell = "–"
+        else:
+            dev = abs(sasa - 100) / 100
+            mark = "✓" if dev <= _SASA_OK else "⚠" if dev <= _SASA_WARN else "✗"
+            sasa_cell = f"{sasa:.1f} {mark}"
+        rows.append(
+            (
+                str(_iteration_index(iter_dir)),
+                sasa_cell,
+                "–" if oc is None else f"{oc:.2f}",
+                *(("–",) * 3 if bonded is None else (str(bonded[k]) for k in "✓⚠✗")),
+                m.get("note", ""),
+            )
+        )
+    lines = _table(rows, align=">>>>>><")
+    lines.append(
+        "(SASA as % of the reference, ✓ within 5 %, ⚠ within 10 %; overlap = mean OC of all "
+        "bead pairs; bonded = terms per mark, as in plot_bonded_distributions)"
+    )
+    return "\n".join(lines)
+
+
+def _stage_report(log_path):
+    """
+    Pull the few numbers worth reporting out of an mdrun .log (None if missing).
+
+    Log wording can change between GROMACS versions, so every field is
+    optional: a pattern that stops matching leaves that field None and it is
+    simply left out of the report, never misreported.
+    """
+    path = Path(log_path)
+    if not path.is_file():
+        return None
+    text = path.read_text(errors="replace")
+
+    def last(pattern, cast=float):
+        found = re.findall(pattern, text, re.MULTILINE)
+        return cast(found[-1]) if found else None
+
+    integrator = last(r"^\s+integrator\s+=\s+(\S+)", str)
+    minimization = integrator in _EM_INTEGRATORS
+    # -nsteps on the command line overrides the mdp value.
+    nsteps = last(
+        r"Overriding nsteps with value passed on the command line: (-?\d+)", int
+    )
+    if nsteps is None:
+        nsteps = last(r"^\s+nsteps\s+=\s+(-?\d+)", int)
+    if minimization:
+        steps_done = last(r" in (\d+) steps", int)
+    else:
+        # MD averages are over steps_done + 1 frames (step 0 included).
+        stats = last(r"Statistics over (\d+) steps", int)
+        steps_done = stats - 1 if stats else None
+
+    finished = "Finished mdrun" in text
+    return {
+        "finished": finished,
+        "integrator": integrator,
+        "nsteps": nsteps,
+        "steps_done": steps_done,
+        "dt": last(r"^\s+dt\s+=\s+(\S+)"),
+        # Only MD reports ns/day; minimization has no simulated time.
+        "ns_per_day": None if minimization else last(r"^Performance:\s+(\S+)"),
+        "wall_s": last(r"^\s+Time:\s+\S+\s+(\S+)"),
+        # Finished short of nsteps (-maxh, a signal, ...). Minimization may
+        # legitimately stop early, so MD only.
+        "stopped_early": (
+            not minimization
+            and finished
+            and None not in (steps_done, nsteps)
+            and 0 <= steps_done < nsteps
+        ),
+        "lincs_warnings": text.count("LINCS WARNING"),
+        # Minimization: final max force vs. the target. Stopping at machine
+        # precision above emtol is normal for Martini, so no flag for it.
+        "fmax": last(r"^Maximum force\s+=\s+(\S+)") if minimization else None,
+        "emtol": last(r"^\s+emtol\s+=\s+(\S+)") if minimization else None,
+    }
+
+
+def _stage_result(rep):
+    """
+    One-line result for a `_stage_report` dict, ending in ✓ or ⚠ + flags.
+    """
+    if rep is None:
+        return "no log"
+
+    parts = []
+    if rep["integrator"] in _EM_INTEGRATORS:
+        if rep["steps_done"]:
+            parts.append(f"{rep['steps_done']} steps")
+        if rep["fmax"] is not None:
+            parts.append(f"Fmax {rep['fmax']:.1f} (target {rep['emtol']:g})")
+    elif rep["steps_done"] is not None and rep["dt"] and rep["nsteps"]:
+        done_ns = rep["steps_done"] * rep["dt"] / 1000
+        total_ns = rep["nsteps"] * rep["dt"] / 1000
+        parts.append(f"{done_ns:.1f}/{total_ns:.1f} ns")
+    if rep["ns_per_day"]:
+        parts.append(f"{rep['ns_per_day']:.0f} ns/day")
+    if rep["wall_s"]:
+        parts.append(str(timedelta(seconds=round(rep["wall_s"]))))
+
+    flags = []
+    if not rep["finished"]:
+        flags.append("did not finish")
+    if rep["stopped_early"]:
+        flags.append("stopped early")
+    if rep["lincs_warnings"]:
+        flags.append(f"{rep['lincs_warnings']} LINCS warnings")
+    parts.append("⚠ " + " · ".join(flags) if flags else "✓")
+    return "   ".join(parts)
+
+
+class _StageLine:
+    """
+    One stage's line of runSim's output (when GROMACS output is not
+    streamed), append-only (never rewritten with \\r, so
+    agents reading raw output get a few tokens, not a flood).
+
+    Created → prints the stage label. Called with `mdrun -v` output (by
+    `_run_mdrun`) → appends an ETA once ~5% is done, then 25 · 50 · 75; the
+    planned step count comes from the stage .log header. `finish` → appends
+    the result, padded so results line up across stages, and ends the line.
+    """
+
+    WIDTH = 42  # progress column width, so result columns line up
+
+    def __init__(self, label, log_path=None):
+        """`log_path` None: no progress, just label + result."""
+        print(label, end="", flush=True)
+        self.log_path = log_path
+        self.start = time.monotonic()
+        self.nsteps = None
+        self.eta_shown = False
+        self.next_pct = 25
+        self.printed = 0
+
+    def __call__(self, text):
+        if self.log_path is None:
+            return
+        steps = re.findall(r"step (\d+)", text)
+        if not steps:
+            return
+        if self.nsteps is None:
+            rep = _stage_report(self.log_path)
+            self.nsteps = (rep and rep["nsteps"]) or 0
+        if self.nsteps <= 0:  # unknown or infinite run: no progress
+            return
+
+        frac = int(steps[-1]) / self.nsteps
+        if not self.eta_shown and 0.05 <= frac < 1:
+            elapsed = time.monotonic() - self.start
+            left = elapsed * (1 - frac) / frac
+            eta = time.strftime("%H:%M", time.localtime(time.time() + left))
+            self._emit(f"ETA {eta} ({_duration(left)})")
+            self.eta_shown = True
+        while self.next_pct < 100 and frac * 100 >= self.next_pct:
+            self._emit(f"{self.next_pct}")
+            self.next_pct += 25
+
+    def _emit(self, text):
+        if self.printed:
+            text = " · " + text
+        print(text, end="", flush=True)
+        self.printed += len(text)
+
+    def finish(self, text):
+        pad = " " * max(3, self.WIDTH - self.printed) if self.printed else ""
+        print(pad + text, flush=True)
+
+
+def _duration(seconds):
+    """Rough human duration: '<1 min', '~9 min', '~1 h 20 min'."""
+    minutes = round(seconds / 60)
+    if minutes < 1:
+        return "<1 min"
+    if minutes < 60:
+        return f"~{minutes} min"
+    return f"~{minutes // 60} h {minutes % 60:02d} min"
+
+
 def _run(cmd, *, log=None, env=None, input_text=None, cwd=None):
     """
     Short helper to assist when using subprocess to run gmx.
+
+    When output goes to `log`, a failure raises with the log's tail in the
+    message, since it was never shown.
     """
-    subprocess.run(
+    try:
+        subprocess.run(
+            cmd,
+            input=input_text,
+            # No input → give it EOF, so a tool that unexpectedly prompts
+            # fails instead of waiting forever.
+            stdin=subprocess.DEVNULL if input_text is None else None,
+            text=input_text is not None,
+            stdout=log,
+            stderr=subprocess.STDOUT,  # if log is None goes to term.
+            env=env,
+            cwd=cwd,
+            check=True,
+        )
+    except subprocess.CalledProcessError as err:
+        if log is None:
+            raise
+        log.flush()
+        with open(log.name, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 20000))
+            tail = f.read().decode(errors="replace")
+        raise _GmxError(err.returncode, cmd, output=tail) from None
+
+
+class _GmxError(subprocess.CalledProcessError):
+    """
+    CalledProcessError whose message ends with the last lines of gmx output.
+    """
+
+    def __str__(self):
+        return (
+            f"{shlex.join(map(str, self.cmd))}\n"
+            f"failed with exit status {self.returncode}. Last output:\n"
+            f"{_tail_lines(self.output or '')}"
+        )
+
+
+def _run_mdrun(
+    cmd,
+    *,
+    log=None,
+    env=None,
+    hang_timeout=600,
+    fatal_grace=30,
+    poll=1.0,
+    on_output=None,
+):
+    """
+    Run `gmx mdrun`, blocking until it exits — but never forever.
+
+    mdrun can crash without exiting (e.g. one thread-MPI rank hits a fatal
+    error and the others wait for it forever). Output is written to `log`
+    (an open file) or, if None, echoed to stdout as it arrives. The process
+    is killed and a RuntimeError raised if:
+
+    - it prints "Fatal error" and is still alive `fatal_grace` s later, or
+    - it prints nothing for `hang_timeout` s (None disables this check).
+
+    This relies on `mdrun -v`, whose progress lines arrive every few
+    seconds; the stage .log is written too rarely to be useful. A non-zero
+    exit raises CalledProcessError (with the output tail), as `_run` does.
+
+    `on_output`, if given, is called with each chunk of output (used for
+    progress). mdrun runs in its own process group and is always killed on
+    the way out, Ctrl-C included.
+    """
+    # Popen only starts mdrun; the loop below is what keeps the cell blocked.
+    # Own session/process group → Ctrl-C in the notebook doesn't reach mdrun
+    # directly, and we can kill mdrun plus all its threads/children at once.
+    proc = subprocess.Popen(
         cmd,
-        input=input_text,
-        text=input_text is not None,
-        stdout=log,
-        stderr=subprocess.STDOUT,  # if log is None goes to term.
+        stdout=subprocess.PIPE,  # we read it ourselves (echo + watchdog)
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
         env=env,
-        cwd=cwd,
-        check=True,
+        start_new_session=True,
     )
+    fd = proc.stdout.fileno()
+    out = log if log is not None else sys.stdout
+    tail = ""  # last ~20 kB of output, for the error message
+    last_output = time.monotonic()  # when mdrun last printed anything
+    fatal_at = None  # when "Fatal error" first showed up
+    eof = False  # mdrun closed its output (normally: it exited)
+    try:
+        # Loop until mdrun has both closed its output and exited.
+        while not (eof and proc.poll() is not None):
+            if eof:
+                time.sleep(poll)
+            # Wait up to `poll` s for output. Waking up even when there is none
+            # is what lets the timeout checks below run on a silent mdrun.
+            elif select.select([fd], [], [], poll)[0]:
+                # os.read returns whatever is available (no waiting for a
+                # newline) — mdrun -v progress uses \r, not \n.
+                chunk = os.read(fd, 65536)
+                if chunk:
+                    text = chunk.decode(errors="replace")
+                    # Echo to the cell (as the old subprocess.run did) or log.
+                    out.write(text)
+                    out.flush()
+                    if on_output is not None:
+                        on_output(text)
+                    tail = (tail + text)[-20000:]
+                    last_output = time.monotonic()
+                    if fatal_at is None and "Fatal error" in tail:
+                        fatal_at = last_output
+                else:
+                    eof = True  # empty read = pipe closed
+
+            # Watchdog: raising here jumps to `finally`, which kills mdrun.
+            now = time.monotonic()
+            if fatal_at is not None and now - fatal_at > fatal_grace:
+                reason = f"still running {fatal_grace} s after a fatal error"
+            elif hang_timeout is not None and now - last_output > hang_timeout:
+                reason = f"no output for {hang_timeout} s"
+            else:
+                continue
+            raise RuntimeError(
+                f"mdrun hung ({reason}) and was killed.\n"
+                f"Command: {shlex.join(map(str, cmd))}\n"
+                f"Last output:\n{_tail_lines(tail)}"
+            )
+    finally:
+        # Runs on normal exit, watchdog raise, Ctrl-C or any other error.
+        # If mdrun is still alive at this point, it must not outlive us.
+        proc.stdout.close()
+        if proc.poll() is None:
+            _kill_group(proc)
+
+    if proc.returncode != 0:
+        raise _GmxError(proc.returncode, cmd, output=tail)
+
+
+def _kill_group(proc, grace=10):
+    """
+    SIGTERM the process group started by `_run_mdrun`, SIGKILL if it lingers.
+    """
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+    except ProcessLookupError:
+        proc.wait()
+
+
+def _tail_lines(text, n=20):
+    """
+    Last `n` non-empty lines of `text`, as a terminal would show them: mdrun
+    -v rewrites its progress line with `\\r`, so only the last rewrite counts.
+    """
+    lines = [line.rstrip("\r").split("\r")[-1] for line in text.split("\n")]
+    return "\n".join([line for line in lines if line.strip()][-n:])
 
 
 def _traj_cleanup(gro, xtc, tpr, outname="pbc", gmx_loc=""):
     """
     Remove water and fix PBC after running the production.
     """
-    u = md.Universe(gro)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", message=r"Failed to guess the mass", category=UserWarning
+        )
+        u = md.Universe(gro)
     clean = u.select_atoms("not resname W ION NA CL")
     clean.write("index_clean.ndx", mode="w", name="clean")
     sel_in = "clean\n"
@@ -583,10 +1127,9 @@ def _checkpoint(mapping=None, itp_glob="*.itp", keep_last=-1):
         return None
 
     existing = list_iterations(cwd)
-    next_idx = (int(_ITER_RE.match(existing[-1].name).group(1)) + 1) if existing else 0
+    next_idx = _iteration_index(existing[-1]) + 1 if existing else 0
 
-    local_tz = datetime.now().astimezone().tzinfo
-    stamp = datetime.now(local_tz).strftime("%Y%m%d_%H%M%S")
+    stamp = time.strftime("%Y%m%d_%H%M%S")  # local time
     iter_dir = cwd / f"iter_{next_idx}_{stamp}"
     iter_dir.mkdir()
 

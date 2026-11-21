@@ -187,3 +187,33 @@ class TestResultStructure:
         res = measure_bonded_terms(u, "MOL", [], [], [])
         assert res["distances"]["hist"].shape[0] == 0
         assert res["angles"]["hist"].shape[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# Default bin coverage
+# ---------------------------------------------------------------------------
+
+
+def test_linear_angle_is_binned_and_far_pair_warns():
+    # A-B-C exactly linear (180°), A-C 60 Å apart (beyond the 0–50 Å bins).
+    u = make_universe([[0, 0, 0], [30, 0, 0], [60, 0, 0]], ["A", "B", "C"])
+
+    with pytest.warns(UserWarning, match=r"A-C: 100\.0% of values fall outside"):
+        res = measure_bonded_terms(u, "MOL", [["A", "C"]], [["A", "B", "C"]], [])
+
+    assert res["angles"]["hist"][0].sum() > 0  # 180° counted, not dropped
+    assert peak_bin(res, "angles") == pytest.approx(179.0)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"bins_dist": [0, 1, 2, 5, 10]},  # uneven
+        {"bins_dihed": [-180, -170, -160, 180]},  # uneven
+        {"bins_dihed": np.linspace(-180, 170, 71)},  # even but not 360°
+    ],
+)
+def test_uneven_or_partial_bins_rejected(kwargs):
+    u = make_universe([[0, 0, 0], [5, 0, 0]], names=["B1", "B2"])
+    with pytest.raises(ValueError, match="bins_"):
+        measure_bonded_terms(u, "MOL", [("B1", "B2")], [], [], **kwargs)

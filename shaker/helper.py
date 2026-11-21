@@ -1,7 +1,10 @@
 """Utility helper functions used across SHAKER modules."""
 
+import warnings
 from functools import lru_cache
 from importlib.resources import files
+
+import numpy as np
 
 _bead_sizes_dict = {"R": 0.264, "S": 0.230, "T": 0.191}
 
@@ -14,6 +17,57 @@ _BEAD_RATIOS = {
 }
 
 _size_label = {"R": "regular", "S": "small", "T": "tiny", "U": "virtual"}
+
+# Default histogram bin edges. Distances (Å) go to 50 Å so large molecules
+# are not truncated; angles and dihedrals (°) cover their full range exactly.
+_BINS_DIST = np.linspace(0, 50, 251)  # 0.2 Å
+_BINS_ANGL = np.linspace(0, 180, 91)  # 2°
+_BINS_DIHED = np.linspace(-180, 180, 181)  # 2°, the full circle once
+
+
+def _check_bins(edges, arg, span=None):
+    """
+    Bin edges as an array, raising ValueError unless they are increasing and
+    evenly spaced (and, if `span` is given, cover exactly `span`). The overlap
+    coefficient and the circular Wasserstein distance assume one bin width.
+    """
+    edges = np.asarray(edges, float)
+    if edges.ndim != 1 or edges.size < 2:
+        raise ValueError(f"{arg} must be a 1-D array of at least 2 bin edges.")
+    widths = np.diff(edges)
+    if widths[0] <= 0 or not np.allclose(widths, widths[0], rtol=1e-6, atol=0):
+        raise ValueError(f"{arg} must be increasing and evenly spaced.")
+    if span is not None and not np.isclose(edges[-1] - edges[0], span):
+        raise ValueError(
+            f"{arg} must cover exactly {span:g}° (e.g. -180 to 180); "
+            f"got {edges[0]:g} to {edges[-1]:g}."
+        )
+    return edges
+
+
+def _density_histograms(values, edges, names, arg):
+    """
+    One `density=True` histogram per list in `values`, warning when values
+    fall outside `edges`: np.histogram drops them silently and rescales the
+    rest, which skews the distribution. `names` labels each list in the
+    warning; `arg` is the bins argument to point the user to.
+    """
+    hists = []
+    for vals, name in zip(values, names):
+        vals = np.asarray(vals, float)
+        outside = np.count_nonzero((vals < edges[0]) | (vals > edges[-1]))
+        if outside:
+            warnings.warn(
+                f"{name}: {outside / vals.size:.1%} of values fall outside the bins "
+                f"({edges[0]:g} to {edges[-1]:g}) and are ignored; pass {arg}= "
+                "to cover them.",
+                stacklevel=3,
+            )
+        # All values outside (already warned): numpy's own 0/0 warning would
+        # only repeat it; the histogram is left as NaN.
+        with np.errstate(invalid="ignore", divide="ignore"):
+            hists.append(np.histogram(vals, bins=edges, density=True)[0])
+    return np.array(hists)
 
 
 def _size_from_name(bead_types):
