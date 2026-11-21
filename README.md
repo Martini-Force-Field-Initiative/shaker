@@ -100,6 +100,15 @@ shaker.map_aa2cg("reference.gro", "reference.xtc", mapping, outname="cg_mapped")
 This writes `cg_mapped.gro` and `cg_mapped.xtc`, and prints a mapping quality report
 comparing your bead count against the Martini 3 ±1/10 heavy-atom tolerance.
 
+Mappings may contain several residue names; all instances of each are mapped.
+Residue and atom names are literal, not selection patterns. Each mapped residue
+must have unique atom names, every requested residue and atom must exist, and
+bead definitions and atom lists must be nonempty. These conditions now raise
+errors rather than accepting ambiguous or incomplete input. An atom may be
+shared between beads, and repeating its name within a bead weights its center.
+`bead_neighbours` accepts the same mapping but analyzes only the first instance
+of its requested residue name; other instances are not checked.
+
 ## 2. Estimate bonded parameters
 
 ```python

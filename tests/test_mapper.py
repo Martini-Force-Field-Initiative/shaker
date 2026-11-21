@@ -5,9 +5,6 @@ Uses minimal GRO + XTC files written to a tmp_path fixture (see conftest.py).
 Positions are in nm in the GRO file; MDAnalysis exposes them in Å internally.
 """
 
-import warnings
-from pathlib import Path
-
 import MDAnalysis as mda
 import pytest
 
@@ -34,6 +31,39 @@ TWO_BEADS = {
         "B2": {"type": "SC3", "charge": 0, "atoms": ["C2"]},
     }
 }
+
+
+@pytest.fixture
+def make_structure(tmp_path):
+    """Write residue specifications as GRO and single-frame XTC files."""
+
+    def make(residues):
+        gro = tmp_path / "input.gro"
+        xtc = tmp_path / "input.xtc"
+        lines = []
+        for resname, resid, atoms in residues:
+            for name, x in atoms:
+                lines.append(
+                    f"{resid:5d}{resname:<5}{name:>5}{len(lines) + 1:5d}"
+                    f"{x / 10:8.3f}{0:8.3f}{0:8.3f}\n"
+                )
+        gro.write_text(
+            f"Test system\n{len(lines):5d}\n"
+            + "".join(lines)
+            + "   5.00000   5.00000   5.00000\n"
+        )
+        u = mda.Universe(str(gro))
+        with mda.Writer(str(xtc), n_atoms=len(u.atoms)) as writer:
+            writer.write(u.atoms)
+        return gro, xtc
+
+    return make
+
+
+def call_mapping_function(function, gro, xtc, mapping, tmp_path, resname="MOL"):
+    if function == "map":
+        return map_aa2cg(gro, xtc, mapping, outdir=tmp_path, report=False)
+    return bead_neighbours(gro, mapping, resname, verbose=False)
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +143,16 @@ class TestBeadPositions:
         assert cg.atoms.positions[0] == pytest.approx([0.0, 0.0, 0.0], abs=0.1)
         assert cg.atoms.positions[1] == pytest.approx([3.0, 0.0, 0.0], abs=0.1)
 
+    def test_repeated_mapping_entries_weight_center(self, two_atom_gro_xtc, tmp_path):
+        gro, xtc = two_atom_gro_xtc
+        mapping = {
+            "MOL": {"B1": {"atoms": ["C1", "C1", "C2"]}, "B2": {"atoms": ["C2"]}}
+        }
+        map_aa2cg(gro, xtc, mapping, outdir=tmp_path, report=False)
+        cg = mda.Universe(str(tmp_path / "cg_mapped.gro"))
+        assert cg.atoms.positions[0] == pytest.approx([1.0, 0.0, 0.0], abs=0.01)
+        assert cg.atoms.positions[1] == pytest.approx([3.0, 0.0, 0.0], abs=0.01)
+
 
 # ---------------------------------------------------------------------------
 # Topology / naming
@@ -151,39 +191,80 @@ class TestTopology:
 
 
 class TestBeadNeighbours:
-    def test_warns_for_atom_names_absent_from_structure(self, two_atom_gro_xtc):
+    def test_shared_atom_connects_beads(self, two_atom_gro_xtc):
         gro, _ = two_atom_gro_xtc
-        gro_path = Path(gro)
-        gro_path.write_text(gro_path.read_text().replace("0.300", "0.150"))
-        mapping = {
-            "MOL": {
-                "B1": {"type": "SC3", "atoms": ["C1", "C99"]},
-                "B2": {"type": "SC3", "atoms": ["C2", "C98", "C99"]},
-                "B3": {"type": "SC3", "atoms": ["C97"]},
-            }
+        mapping = {"MOL": {"B1": {"atoms": ["C1", "C1"]}, "B2": {"atoms": ["C1"]}}}
+        assert bead_neighbours(gro, mapping, "MOL", verbose=False) == {
+            "B1": ["B2"],
+            "B2": ["B1"],
         }
 
-        with pytest.warns(UserWarning, match="Atom names in the mapping") as recorded:
-            result = bead_neighbours(gro, mapping, "MOL", verbose=False)
-
-        assert len(recorded) == 1
-        message = str(recorded[0].message)
-        assert "residue 'MOL'" in message
-        assert "bead 'B1': C99" in message
-        assert "bead 'B2': C98, C99" in message
-        assert "bead 'B3': C97" in message
-        assert result == {"B1": ["B2"], "B2": ["B1"], "B3": []}
-
-    def test_no_missing_atom_warning_for_complete_mapping(self, two_atom_gro_xtc):
-        gro, _ = two_atom_gro_xtc
-        with warnings.catch_warnings(record=True) as recorded:
-            warnings.simplefilter("always")
-            bead_neighbours(gro, TWO_BEADS, "MOL", verbose=False)
-
-        assert not any(
-            "Atom names in the mapping are absent" in str(warning.message)
-            for warning in recorded
+    def test_only_first_instance_and_requested_mapping_are_validated(
+        self, make_structure
+    ):
+        gro, _ = make_structure(
+            [
+                ("MOL", 1, [("C1", 0), ("C2", 1.5)]),
+                ("MOL", 2, [("C1", 10), ("C1", 11.5)]),
+            ]
         )
+        mapping = {**TWO_BEADS, "OTHER": {}}
+        assert bead_neighbours(gro, mapping, "MOL", verbose=False) == {
+            "B1": ["B2"],
+            "B2": ["B1"],
+        }
+
+
+class TestMultiResidueMapping:
+    def test_maps_all_requested_types_and_instances(self, make_structure, tmp_path):
+        gro, xtc = make_structure(
+            [
+                ("MOL", 1, [("C1", 0), ("C2", 1.5)]),
+                ("SOL", 2, [("C1", 4)]),
+                ("MOL", 3, [("C1", 8), ("C2", 9.5)]),
+            ]
+        )
+        mapping = {
+            "SOL": {"S": {"atoms": ["C1"]}},
+            "MOL": {"M": {"atoms": ["C2"]}},
+        }
+        source = mda.Universe(str(gro))
+        with mda.Writer(str(xtc), n_atoms=len(source.atoms)) as writer:
+            writer.write(source.atoms)
+            source.atoms.positions += [1, 0, 0]
+            writer.write(source.atoms)
+        map_aa2cg(gro, xtc, mapping, outdir=tmp_path, report=False)
+        cg = mda.Universe(
+            str(tmp_path / "cg_mapped.gro"), str(tmp_path / "cg_mapped.xtc")
+        )
+        assert list(cg.atoms.resnames) == ["SOL", "MOL", "MOL"]
+        assert list(cg.atoms.resids) == [2, 1, 3]
+        assert list(cg.atoms.names) == ["S", "M", "M"]
+        assert len(cg.trajectory) == 2
+        assert cg.atoms.positions[:, 0] == pytest.approx([4, 1.5, 9.5], abs=0.01)
+        cg.trajectory[1]
+        assert cg.atoms.positions[:, 0] == pytest.approx([5, 2.5, 10.5], abs=0.01)
+
+    @pytest.mark.parametrize(
+        "second_atoms, message",
+        [
+            ([("C1", 10), ("C1", 11.5)], "Duplicate atom names"),
+            ([("C1", 10)], "Atom 'C2' not found"),
+        ],
+    )
+    def test_invalid_later_instance_does_not_write_output(
+        self, make_structure, tmp_path, second_atoms, message
+    ):
+        gro, xtc = make_structure(
+            [("MOL", 1, [("C1", 0), ("C2", 1.5)]), ("MOL", 2, second_atoms)]
+        )
+        output = tmp_path / "cg_mapped.gro"
+        output.write_text("existing output")
+        with pytest.raises(ValueError, match=message):
+            map_aa2cg(gro, xtc, TWO_BEADS, outdir=tmp_path)
+        assert output.read_text() == "existing output"
+        assert not (tmp_path / "cg_mapped.xtc").exists()
+        assert not (tmp_path / "cg_mapped_mapping.log").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -207,3 +288,90 @@ class TestErrors:
             map_aa2cg(
                 gro, xtc, bad_mapping, outname="out", outdir=str(tmp_path), report=False
             )
+
+    def test_missing_residue_among_valid_entries_raises(
+        self, two_atom_gro_xtc, tmp_path
+    ):
+        gro, xtc = two_atom_gro_xtc
+        mapping = {**TWO_BEADS, "XXX": {"B": {"atoms": ["C1"]}}}
+        with pytest.raises(ValueError, match="No residue named 'XXX'"):
+            map_aa2cg(gro, xtc, mapping, outdir=tmp_path, report=False)
+        assert not (tmp_path / "cg_mapped.xtc").exists()
+
+    @pytest.mark.parametrize("function", ["map", "neighbours"])
+    @pytest.mark.parametrize("duplicate", ["C1", "C3"])
+    def test_duplicate_atom_names_rejected_even_if_unmapped(
+        self, make_structure, tmp_path, function, duplicate
+    ):
+        atoms = [("C1", 0), ("C2", 1.5), (duplicate, 3)]
+        if duplicate == "C3":
+            atoms.append(("C3", 4.5))
+        gro, xtc = make_structure([("MOL", 7, atoms)])
+        with pytest.raises(
+            ValueError, match=f"Duplicate atom names.*MOL.*7.*{duplicate}"
+        ):
+            call_mapping_function(function, gro, xtc, TWO_BEADS, tmp_path)
+
+    @pytest.mark.parametrize("function", ["map", "neighbours"])
+    @pytest.mark.parametrize(
+        "mapping, message",
+        [
+            ({"MOL": {}}, "No beads defined.*MOL"),
+            ({"MOL": {"B1": {}}}, "No atoms defined.*B1.*MOL"),
+            ({"MOL": {"B1": {"atoms": []}}}, "No atoms defined.*B1.*MOL"),
+            ({"MOL": {"B1": {"atoms": ["C99"]}}}, "Atom 'C99' not found.*B1.*MOL"),
+            ({"MOL": {"B1": {"atoms": ["C*"]}}}, r"Atom 'C\*' not found"),
+        ],
+    )
+    def test_invalid_selected_mapping_rejected(
+        self, two_atom_gro_xtc, tmp_path, function, mapping, message
+    ):
+        gro, xtc = two_atom_gro_xtc
+        with pytest.raises(ValueError, match=message):
+            call_mapping_function(function, gro, xtc, mapping, tmp_path)
+
+    @pytest.mark.parametrize("function", ["map", "neighbours"])
+    def test_atom_list_cannot_be_a_string(self, two_atom_gro_xtc, tmp_path, function):
+        gro, xtc = two_atom_gro_xtc
+        mapping = {"MOL": {"B1": {"atoms": "C1"}}}
+        with pytest.raises(TypeError, match="Atom names.*B1.*MOL.*list"):
+            call_mapping_function(function, gro, xtc, mapping, tmp_path)
+
+    def test_empty_mapping_rejected(self, two_atom_gro_xtc, tmp_path):
+        gro, xtc = two_atom_gro_xtc
+        with pytest.raises(ValueError, match="at least one residue"):
+            map_aa2cg(gro, xtc, {}, outdir=tmp_path, report=False)
+        with pytest.raises(ValueError, match="No mapping found"):
+            bead_neighbours(gro, {}, "MOL", verbose=False)
+
+    @pytest.mark.parametrize("function", ["map", "neighbours"])
+    def test_residue_name_is_literal(self, two_atom_gro_xtc, tmp_path, function):
+        gro, xtc = two_atom_gro_xtc
+        mapping = {"M*": {"B1": {"atoms": ["C1"]}}}
+        with pytest.raises(ValueError, match=r"No residue named 'M\*'"):
+            call_mapping_function(function, gro, xtc, mapping, tmp_path, resname="M*")
+
+    def test_literal_pattern_names_and_mapping_report(self, make_structure, tmp_path):
+        gro, xtc = make_structure(
+            [("MOL", 2, [("C1", 4), ("C2", 5.5)]), ("M*", 1, [("C*", 0)])]
+        )
+        mapping = {"M*": {"B": {"atoms": ["C*"]}}}
+        map_aa2cg(gro, xtc, mapping, outdir=tmp_path, verbose=False)
+        cg = mda.Universe(str(tmp_path / "cg_mapped.gro"))
+        assert list(cg.atoms.resnames) == ["M*"]
+        report = (tmp_path / "cg_mapped_mapping.log").read_text()
+        assert "Residue : M*" in report
+        assert "Heavy atoms in residue   : 1" in report
+
+    def test_literal_pattern_names_in_neighbours(self, make_structure):
+        gro, _ = make_structure(
+            [
+                ("MOL", 2, [("C1", 4), ("C1", 5.5)]),
+                ("M*", 1, [("C*", 0), ("C2", 1.5)]),
+            ]
+        )
+        mapping = {"M*": {"B1": {"atoms": ["C*"]}, "B2": {"atoms": ["C2"]}}}
+        assert bead_neighbours(gro, mapping, "M*", verbose=False) == {
+            "B1": ["B2"],
+            "B2": ["B1"],
+        }

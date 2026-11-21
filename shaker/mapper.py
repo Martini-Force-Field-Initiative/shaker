@@ -1,6 +1,7 @@
 """Map AA/QM trajectories to CG representations."""
 
 import warnings
+from collections import Counter
 from pathlib import Path
 
 import MDAnalysis as md
@@ -48,7 +49,7 @@ def _write_mapping_report(u, mapping, outdir, outname, verbose=True):
     lines.append("")
 
     for resname, beads in mapping.items():
-        residues = u.select_atoms(f"resname {resname}").residues
+        residues = u.residues[u.residues.resnames == resname]
         if len(residues) == 0:
             continue
 
@@ -124,6 +125,43 @@ def _write_mapping_report(u, mapping, outdir, outname, verbose=True):
         print(report_str)
 
 
+def _residue_bead_indices(residue, beads):
+    """Validate a residue mapping and resolve bead atom names to local indices."""
+    resname, resid = residue.resname, residue.resid
+    if not beads:
+        raise ValueError(f"No beads defined for resname '{resname}' (resid {resid})")
+
+    names = list(residue.atoms.names)
+    duplicates = sorted(name for name, count in Counter(names).items() if count > 1)
+    if duplicates:
+        raise ValueError(
+            f"Duplicate atom names in resname '{resname}' (resid {resid}): "
+            f"{', '.join(duplicates)}"
+        )
+    indices = {name: index for index, name in enumerate(names)}
+    bead_indices = {}
+    for bead, definition in beads.items():
+        atom_names = definition.get("atoms")
+        if not atom_names:
+            raise ValueError(
+                f"No atoms defined for bead '{bead}' in resname "
+                f"'{resname}' (resid {resid})"
+            )
+        if isinstance(atom_names, str):
+            raise TypeError(
+                f"Atom names for bead '{bead}' in resname '{resname}' "
+                f"(resid {resid}) must be a list, not a string"
+            )
+        for name in atom_names:
+            if name not in indices:
+                raise ValueError(
+                    f"Atom '{name}' not found for bead '{bead}' in resname "
+                    f"'{resname}' (resid {resid})"
+                )
+        bead_indices[bead] = [indices[name] for name in atom_names]
+    return bead_indices
+
+
 def map_aa2cg(
     gro, xtc, mapping, outname="cg_mapped", outdir=".", report=True, verbose=None
 ):
@@ -161,9 +199,10 @@ def map_aa2cg(
             }
 
         The top-level keys correspond to residue names present in the atomistic
-        system. Each bead entry is keyed by the desired CG bead name and must
-        contain an ``atoms`` field listing the atom names contributing to that
-        bead. Optional ``type`` and ``charge`` fields may be provided; the
+        system. All instances of every listed residue are mapped. Each bead
+        entry is keyed by the desired CG bead name and must contain a nonempty
+        ``atoms`` list of atom names contributing to that bead. Optional
+        ``type`` and ``charge`` fields may be provided; the
         ``type`` field is used to infer bead size class (R/S/T/U) for
         type-weighted mismatch reporting.
     outname : str, optional
@@ -194,19 +233,30 @@ def map_aa2cg(
     -----
     - Bead coordinates are computed as the center of geometry (COG) of the
       atoms assigned to each bead.
-    - Atom names may appear multiple times in a bead definition to apply
-      weighting when computing the bead center.
+    - Residue and atom names are matched literally, not as selection patterns.
+      Atom names must be unique within each mapped residue instance.
+    - An atom may be shared by beads; its name may also appear multiple times
+      in one bead definition to weight its contribution to the bead center.
     - The output trajectory contains one particle per bead in the order defined
       by the mapping dictionary.
     - The output structure corresponds to the first frame of the mapped
       trajectory.
-    - Atom selections that do not match any atoms will raise a ``ValueError``.
+
+    Raises
+    ------
+    ValueError
+        If the mapping, a residue's bead definitions, or a bead's atom list is
+        empty; a requested residue or atom is absent; or an analyzed residue
+        contains duplicate atom names.
+    TypeError
+        If a bead's ``atoms`` field is a string instead of a list of names.
     """
 
     gro = Path(gro).resolve()
     xtc = Path(xtc).resolve()
     outdir = Path(outdir).resolve()
-    outdir.mkdir(parents=True, exist_ok=True)
+    if not mapping:
+        raise ValueError("The mapping must contain at least one residue")
 
     with warnings.catch_warnings():
         warnings.filterwarnings(
@@ -224,29 +274,19 @@ def map_aa2cg(
     out_atomnames = []
 
     for resname, beads in mapping.items():
-        for res in u.select_atoms(f"resname {resname}").residues:
+        residues = u.residues[u.residues.resnames == resname]
+        if len(residues) == 0:
+            raise ValueError(f"No residue named '{resname}' in {gro}")
+        for res in residues:
             atoms = res.atoms
-            for bead_name, bead_def in beads.items():
-                agg_whole = u.select_atoms("name empty")
-                for atom in bead_def["atoms"]:
-                    agg = atoms.select_atoms(f"name {atom}")
-                    if len(agg) == 0:
-                        raise ValueError(
-                            f"Atom '{atom}' not found in resname "
-                            f"'{resname}' (resid {res.resid})"
-                        )
-                    agg_whole += agg
-
-                bead_agg.append(agg_whole)
+            for bead_name, indices in _residue_bead_indices(res, beads).items():
+                bead_agg.append(atoms[indices])
                 out_resids.append(res.resid)
                 out_resnames.append(res.resname)
                 out_atomnames.append(bead_name)
 
     n_beads = len(bead_agg)
-    if n_beads == 0:
-        raise ValueError(
-            "No beads were generated. Check the mapping and residue names."
-        )
+    outdir.mkdir(parents=True, exist_ok=True)
 
     # Create an empty CG Universe with n_beads atoms
     cg = md.Universe.empty(
@@ -296,7 +336,8 @@ def bead_neighbours(structure, mapping, resname, verbose=None):
     Two beads are neighbours if an atom of one is bonded to an atom of the
     other, directly or through atoms that belong to no bead, or if they
     share an atom. AA bonds are guessed by MDAnalysis from interatomic
-    distances, on the first residue named `resname` in `structure`.
+    distances, on the first residue named `resname` in `structure`. Other
+    instances of that name are not checked and may have different bonds.
 
     The printed summary also lists bead rings: cycles of bonded beads (up
     to 8 beads) with no shortcut through them. These usually, but not
@@ -309,9 +350,11 @@ def bead_neighbours(structure, mapping, resname, verbose=None):
     structure : str or Path
         AA structure file (e.g. .gro or .pdb). No trajectory is needed.
     mapping : dict
-        Mapping dictionary in SHAKER format.
+        Mapping dictionary in SHAKER format. Only the entry for `resname` is
+        validated; other residue entries are ignored.
     resname : str
-        Residue name of the mapped molecule.
+        Literal residue name of the mapped molecule. Atom names are also
+        matched literally and must be unique within the selected residue.
     verbose : bool or None, optional
         Whether to print each bead's neighbours, the number of bonded pairs
         and the bead rings. None (default) uses the SHAKER-wide setting (see
@@ -322,17 +365,15 @@ def bead_neighbours(structure, mapping, resname, verbose=None):
     dict
         ``{bead: [neighbouring beads]}``, in mapping order.
 
-    Warns
-    -----
-    UserWarning
-        If mapped atom names are absent from the first matching residue. The
-        warning identifies the affected beads; those atoms are ignored.
-
     Raises
     ------
     ValueError
-        If `resname` is not in `structure` or `mapping`, or if bonds cannot
-        be guessed (e.g. atom types cannot be inferred from atom names).
+        If `resname` is not in `structure` or `mapping`, the selected mapping
+        has no beads or a bead has no atoms, a mapped atom is absent, the
+        selected residue has duplicate atom names, or bonds cannot be guessed
+        (e.g. atom types cannot be inferred from atom names).
+    TypeError
+        If a bead's ``atoms`` field is a string instead of a list of names.
     """
     if resname not in mapping:
         raise ValueError(f"No mapping found for resname '{resname}'")
@@ -342,10 +383,11 @@ def bead_neighbours(structure, mapping, resname, verbose=None):
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message=r"Element information is missing")
         u = md.Universe(str(structure))
-    residues = u.select_atoms(f"resname {resname}").residues
+    residues = u.residues[u.residues.resnames == resname]
     if len(residues) == 0:
         raise ValueError(f"No residue named '{resname}' in {structure}")
     atoms = residues[0].atoms
+    bead_indices = _residue_bead_indices(residues[0], beads)
     try:
         atoms.guess_bonds()
     except (ValueError, KeyError) as err:
@@ -354,30 +396,12 @@ def bead_neighbours(structure, mapping, resname, verbose=None):
         ) from err
 
     # Beads each atom belongs to (by atom name), and atom-atom bonds.
-    names = list(atoms.names)
-    atom_names = set(names)
-    missing_by_bead = {}
-    atom_beads = [set() for _ in names]
-    for bead, info in beads.items():
-        missing = sorted(set(info["atoms"]) - atom_names)
-        if missing:
-            missing_by_bead[bead] = missing
-        for name in info["atoms"]:
-            if name in atom_names:
-                atom_beads[names.index(name)].add(bead)
-    if missing_by_bead:
-        details = "; ".join(
-            f"bead '{bead}': {', '.join(missing)}"
-            for bead, missing in missing_by_bead.items()
-        )
-        warnings.warn(
-            f"Atom names in the mapping are absent from residue '{resname}' "
-            f"in {structure}: {details}",
-            UserWarning,
-            stacklevel=2,
-        )
+    atom_beads = [set() for _ in atoms]
+    for bead, indices in bead_indices.items():
+        for index in indices:
+            atom_beads[index].add(bead)
     local = {a.index: k for k, a in enumerate(atoms)}
-    bonded = [set() for _ in names]
+    bonded = [set() for _ in atoms]
     for a, b in atoms.bonds.indices:
         if a in local and b in local:
             bonded[local[a]].add(local[b])
