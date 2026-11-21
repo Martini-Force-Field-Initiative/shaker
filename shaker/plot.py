@@ -735,9 +735,10 @@ def _oc_status(oc):
 def _distance_xlim(bins, hists, default=(1.5, 5.5), width=4.0, frac=0.01):
     """
     x-limits for a distance panel: `default` unless some dataset has
-    significant density (> `frac` of its peak) outside it; then a window of
-    the same `width` (Å) centred between the datasets' peaks, so panels stay
-    comparable at a glance (tails of very broad distributions may be cut).
+    significant density (> `frac` of its peak) outside it; then a window
+    centred between the datasets' peaks, at least `width` Å wide. If the
+    peak span fills that window, widen it with 5% padding on each side
+    (tails of very broad distributions may still be cut).
     """
     bins = np.asarray(bins, float)
     present = np.zeros(bins.size, bool)
@@ -752,6 +753,9 @@ def _distance_xlim(bins, hists, default=(1.5, 5.5), width=4.0, frac=0.01):
     lo, hi = bins[present].min(), bins[present].max()
     if default[0] <= lo and hi <= default[1]:
         return default
+    span = max(peaks) - min(peaks)
+    if span >= width:
+        width = 1.1 * span  # 5% padding on either side of the outermost peaks
     center = max((min(peaks) + max(peaks)) / 2, width / 2)  # never below 0 Å
     return float(center - width / 2), float(center + width / 2)
 
