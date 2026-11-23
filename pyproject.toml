@@ -31,6 +31,9 @@ dependencies = [
 "rdkit"
 ]
 
+[project.optional-dependencies]
+agent = ["jsonschema>=4", "litellm-core>=1.110.2,<2"]
+
 [dependency-groups]
 dev = ["python-dotenv"]
 lint = ["ruff==0.16.7", "nbqa", "pre-commit"]
