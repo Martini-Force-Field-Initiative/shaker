@@ -8,7 +8,10 @@ __pycache__/
 *.pyc
 *.pyo
 build/
+dist/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .git/
 .claude/
 #vscode settings
@@ -20,6 +23,11 @@ docs/source/_apireference/_generated/
 docs/source/_modules/_generated/
 .doctrees/
 
+# uv virtual enviroment 
+.venv/
+# Enviroment/secrets
+.env
+secrets/
 
 # Ignore everything (output) in the tutorial subfolders
 tutorials/1_BasicParameterization/*
@@ -40,7 +48,3 @@ tutorials/AA_references/VirtualSites/*
 !tutorials/AA_references/BasicParam/initial_itp.itp
 !tutorials/AA_references/VirtualSites/
 !tutorials/AA_references/VirtualSites/cg.pdb
-
-# venv
-shaker-venv/
-shaker_full/

@@ -32,11 +32,13 @@ dependencies = [
 ]
 
 [dependency-groups]
+dev = ["python-dotenv"]
 lint = ["ruff==0.16.7", "nbqa", "pre-commit"]
 typecheck = ["mypy", "types-tqdm", "scipy-stubs"]
 test = ["pytest"]
 docs = ["sphinx", "sphinx-design","pydata-sphinx-theme","numpydoc","myst-nb"]
 all = [
+      { include-group = "dev" },
       { include-group = "lint" },
       { include-group = "typecheck" },
       { include-group = "test" },
@@ -62,7 +64,7 @@ include = ["shaker*"]
 shaker = ["data/**/*"]
 
 # Setuptools deprecated pkg_resources and show a warning about it.
-# nglview uses it so we ignore and pin setuptools,81 to make sure it works.
+# nglview uses it so we ignore and pin setuptools<81 to make sure it works.
 [tool.pytest.ini_options]
 filterwarnings = [
   "ignore:pkg_resources is deprecated as an API:UserWarning:nglview",
